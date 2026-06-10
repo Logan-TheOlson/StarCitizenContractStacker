@@ -38,6 +38,43 @@ def test_path_and_picker() -> None:
         app.destroy()
 
 
+def test_arrow_keys_move_highlight() -> None:
+    app = m.CargoApp()
+    try:
+        app.update_idletasks()
+        p = app.cpickup_picker
+        p.var.set("")
+        p._show()
+        app.update_idletasks()
+        base = p.listbox.curselection()[0]
+        p._move(1)
+        p._move(1)
+        assert p.listbox.curselection()[0] == base + 2
+        p._move(-1)
+        assert p.listbox.curselection()[0] == base + 1
+        # clamps at the top, never goes negative
+        for _ in range(20):
+            p._move(-1)
+        assert p.listbox.curselection()[0] == 0
+    finally:
+        app.destroy()
+
+
+def test_dropoff_sorts_closest_first() -> None:
+    app = m.CargoApp()
+    try:
+        app.update_idletasks()
+        app.cpickup_picker.set_by_id("LORVILLE")
+        d = app.cdropoff_picker
+        d.var.set("")
+        d._show()
+        app.update_idletasks()
+        dists = [app.cost.travel_minutes("LORVILLE", lid) for _, lid in d._matches]
+        assert dists == sorted(dists), dists
+    finally:
+        app.destroy()
+
+
 def test_build_contract_and_optimize() -> None:
     app = m.CargoApp()
     try:
@@ -103,6 +140,8 @@ if __name__ == "__main__":
     test_box_parser()
     test_index_to_letters()
     test_path_and_picker()
+    test_arrow_keys_move_highlight()
+    test_dropoff_sorts_closest_first()
     test_build_contract_and_optimize()
     test_cargo_with_different_dropoffs()
     test_clear_labels_recompacts()

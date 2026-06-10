@@ -115,13 +115,17 @@ class LocationPicker(ctk.CTkFrame):
     MAX_RESULTS = 14
 
     def __init__(self, master, options, placeholder="Type to search…",
-                 width=320, on_choose=None, allow_free=False, variable=None):
+                 width=320, on_choose=None, allow_free=False, variable=None,
+                 sort_key=None):
         super().__init__(master, fg_color="transparent")
         self.options = options
         # Pre-lowercase labels once so filtering doesn't re-lowercase every
         # option on every keystroke.
         self._opts_lower = [(label, label.lower(), lid) for label, lid in options]
         self.allow_free = allow_free
+        # Optional ``sort_key(value) -> float | None``: when set, matches are
+        # ordered ascending by it (closest first), with None sorted last.
+        self._sort_key = sort_key
         self._id = None
         self._matches = []
         self._on_choose = on_choose
@@ -133,7 +137,10 @@ class LocationPicker(ctk.CTkFrame):
         self.entry.pack(fill="x")
         self.entry.bind("<KeyRelease>", self._on_key)
         self.entry.bind("<Button-1>", lambda _e: self._show())
-        self.entry.bind("<Down>", self._enter_list)
+        # Arrow keys move the highlighted match while focus stays in the entry;
+        # Enter accepts it (see _on_return).
+        self.entry.bind("<Down>", lambda _e: self._move(1))
+        self.entry.bind("<Up>", lambda _e: self._move(-1))
         self.entry.bind("<Return>", self._on_return)
         self.entry.bind("<FocusOut>", lambda _e: self._schedule_close())
         self.popup = None
@@ -179,7 +186,14 @@ class LocationPicker(ctk.CTkFrame):
             matches = [(label, lid) for label, low, lid in self._opts_lower
                        if all(t in low for t in tokens)]
         else:
-            matches = self.options
+            matches = list(self.options)
+        # Sort closest-first (if a distance key is set) BEFORE truncating, so the
+        # MAX_RESULTS shown are the nearest matches, not the alphabetically-first.
+        if self._sort_key is not None:
+            def _key(opt):
+                d = self._sort_key(opt[1])
+                return (d is None, d if d is not None else 0.0)
+            matches.sort(key=_key)
         matches = matches[:self.MAX_RESULTS]
         if not matches:
             self._close()
@@ -234,14 +248,22 @@ class LocationPicker(ctk.CTkFrame):
             self._accept()
             return "break"
 
-    def _enter_list(self, _event):
+    def _move(self, delta):
+        """Move the highlighted match by ``delta`` rows, keeping focus in the
+        entry. Opens the list on the first Down if it isn't showing yet."""
         if self.popup is None:
             self._show()
-        if self.listbox is not None:
-            self.listbox.focus_set()
-            self.listbox.selection_clear(0, "end")
-            self.listbox.selection_set(0)
-            self.listbox.activate(0)
+            return "break"
+        if self.listbox is None or self.listbox.size() == 0:
+            return "break"
+        cur = self.listbox.curselection()
+        i = cur[0] + delta if cur else (0 if delta > 0 else self.listbox.size() - 1)
+        i = max(0, min(self.listbox.size() - 1, i))
+        self.listbox.selection_clear(0, "end")
+        self.listbox.selection_set(i)
+        self.listbox.activate(i)
+        self.listbox.see(i)
+        return "break"
 
     def _click(self, event):
         if self.listbox is not None:
@@ -395,6 +417,18 @@ class CargoApp(ctk.CTk):
         opts.sort(key=lambda o: o[0].lower())
         return opts
 
+    def _dist_key(self, ref_getter):
+        """Build a ``sort_key`` for a LocationPicker that orders options by
+        travel time from a reference location (resolved fresh on each open via
+        ``ref_getter()``). Returns None when there's no reference yet, so the
+        picker falls back to its alphabetical order."""
+        def key(loc_id):
+            ref = ref_getter()
+            if not ref or not loc_id:
+                return None
+            return self.cost.travel_minutes(ref, loc_id)
+        return key
+
     # -- layout ------------------------------------------------------------
 
     def _build(self) -> None:
@@ -504,7 +538,9 @@ class CargoApp(ctk.CTk):
         top.pack(fill="x", padx=12)
         _label(top, "Pickup (stays for the next contract)").grid(
             row=0, column=0, padx=6, sticky="w")
-        self.cpickup_picker = LocationPicker(top, self.loc_options, width=320)
+        self.cpickup_picker = LocationPicker(
+            top, self.loc_options, width=320,
+            sort_key=self._dist_key(lambda: self.start_picker.get_id()))
         self.cpickup_picker.grid(row=1, column=0, padx=6, pady=(0, 8), sticky="w")
         _label(top, "Reward aUEC").grid(row=0, column=1, padx=6, sticky="w")
         _entry(top, self.reward_var, 130).grid(row=1, column=1, padx=6,
@@ -528,8 +564,9 @@ class CargoApp(ctk.CTk):
         self.commodity_picker.grid(row=1, column=0, padx=4, pady=(0, 6), sticky="w")
         amt = _entry(row, self.amount_var, 52, "SCU")
         amt.grid(row=1, column=1, padx=4, pady=(0, 6), sticky="w")
-        self.cdropoff_picker = LocationPicker(row, self.loc_options, width=140,
-                                              placeholder="dropoff…")
+        self.cdropoff_picker = LocationPicker(
+            row, self.loc_options, width=140, placeholder="dropoff…",
+            sort_key=self._dist_key(lambda: self.cpickup_picker.get_id()))
         self.cdropoff_picker.grid(row=1, column=2, padx=4, pady=(0, 6), sticky="w")
         boxes = _entry(row, self.boxes_var, 60, "32x1")
         boxes.grid(row=1, column=3, padx=4, pady=(0, 6), sticky="w")
