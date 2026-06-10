@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import sys
 import tkinter as tk
+import tkinter.font as tkfont
 from pathlib import Path
 
 import customtkinter as ctk
@@ -117,10 +118,14 @@ class LocationPicker(ctk.CTkFrame):
                  width=320, on_choose=None, allow_free=False, variable=None):
         super().__init__(master, fg_color="transparent")
         self.options = options
+        # Pre-lowercase labels once so filtering doesn't re-lowercase every
+        # option on every keystroke.
+        self._opts_lower = [(label, label.lower(), lid) for label, lid in options]
         self.allow_free = allow_free
         self._id = None
         self._matches = []
         self._on_choose = on_choose
+        self._close_after = None
         self.var = variable or tk.StringVar()
         self.entry = ctk.CTkEntry(self, textvariable=self.var, width=width,
                                   fg_color=FIELD_BG, border_color=FIELD_BG,
@@ -130,7 +135,7 @@ class LocationPicker(ctk.CTkFrame):
         self.entry.bind("<Button-1>", lambda _e: self._show())
         self.entry.bind("<Down>", self._enter_list)
         self.entry.bind("<Return>", self._on_return)
-        self.entry.bind("<FocusOut>", lambda _e: self.after(150, self._close))
+        self.entry.bind("<FocusOut>", lambda _e: self._schedule_close())
         self.popup = None
         self.listbox = None
 
@@ -170,8 +175,11 @@ class LocationPicker(ctk.CTkFrame):
 
     def _show(self):
         tokens = [t for t in self.var.get().lower().split() if t]
-        matches = [o for o in self.options
-                   if all(t in o[0].lower() for t in tokens)] if tokens else self.options
+        if tokens:
+            matches = [(label, lid) for label, low, lid in self._opts_lower
+                       if all(t in low for t in tokens)]
+        else:
+            matches = self.options
         matches = matches[:self.MAX_RESULTS]
         if not matches:
             self._close()
@@ -191,11 +199,15 @@ class LocationPicker(ctk.CTkFrame):
         self.popup = tk.Toplevel(self)
         self.popup.wm_overrideredirect(True)
         self.popup.attributes("-topmost", True)
+        self._lb_font = tkfont.Font(font=("Segoe UI", 10))
         self.listbox = tk.Listbox(
             self.popup, activestyle="none", bg=FIELD_BG, fg=TEXT,
             selectbackground=ACCENT, selectforeground=ACCENT_TEXT,
             highlightthickness=1, highlightbackground=ACCENT, borderwidth=0,
-            font=("Segoe UI", 10), height=self.MAX_RESULTS)
+            # Keep the highlighted row selected even while the entry keeps focus,
+            # so <Return> has a current selection to accept.
+            exportselection=False,
+            font=self._lb_font, height=self.MAX_RESULTS)
         self.listbox.pack(fill="both", expand=True)
         self.listbox.bind("<Return>", lambda _e: self._accept())
         self.listbox.bind("<Double-Button-1>", lambda _e: self._accept())
@@ -207,9 +219,13 @@ class LocationPicker(ctk.CTkFrame):
         self.update_idletasks()
         x = self.entry.winfo_rootx()
         y = self.entry.winfo_rooty() + self.entry.winfo_height() + 2
-        w = self.entry.winfo_width()
         rows = max(1, min(len(self._matches), self.MAX_RESULTS))
         self.listbox.configure(height=rows)
+        # Widen to fit the longest match (full path labels are often wider than
+        # the entry) so nothing is clipped; never shrink below the entry width.
+        longest = max((self._lb_font.measure(label) for label, _ in self._matches),
+                      default=0)
+        w = max(self.entry.winfo_width(), longest + 24)
         self.popup.wm_geometry(f"{w}x{rows * 22 + 6}+{x}+{y}")
 
     def _on_return(self, _event):
@@ -245,11 +261,28 @@ class LocationPicker(ctk.CTkFrame):
         if self._on_choose:
             self._on_choose()
 
+    def _schedule_close(self):
+        # Delay so a click landing on the listbox is handled before we close.
+        self._close_after = self.after(150, self._close)
+
     def _close(self):
+        if self._close_after is not None:
+            try:
+                self.after_cancel(self._close_after)
+            except Exception:
+                pass
+            self._close_after = None
         if self.popup is not None:
-            self.popup.destroy()
+            try:
+                self.popup.destroy()
+            except Exception:
+                pass            # already torn down (e.g. app closing)
             self.popup = None
             self.listbox = None
+
+    def destroy(self):
+        self._close()
+        super().destroy()
 
 
 # --- small widget helpers -------------------------------------------------
@@ -314,9 +347,30 @@ class CargoApp(ctk.CTk):
         self.boxes_var = tk.StringVar()
         self.overlay_var = tk.BooleanVar(value=False)
         self._overlay = False
+        self._afters: set[str] = set()    # pending after() ids, cancelled on close
 
         self._build()
         self.bind("<Control-Return>", lambda _e: self._add_contract())
+
+    def _after(self, ms: int, cb) -> str:
+        """``after`` that auto-deregisters and is cancelled on teardown, so a
+        delayed callback never fires against a destroyed window."""
+        def wrapped():
+            self._afters.discard(aid)
+            cb()
+        aid = self.after(ms, wrapped)
+        self._afters.add(aid)
+        return aid
+
+    def destroy(self) -> None:
+        for aid in (*self._afters, getattr(self, "_rt_after", None)):
+            if aid is not None:
+                try:
+                    self.after_cancel(aid)
+                except Exception:
+                    pass
+        self._afters.clear()
+        super().destroy()
 
     # -- data helpers ------------------------------------------------------
 
@@ -498,7 +552,7 @@ class CargoApp(ctk.CTk):
     def _flash(self, msg: str) -> None:
         self.entry_status.configure(text=msg)
         if msg:
-            self.after(3500, lambda: self.entry_status.configure(text=""))
+            self._after(3500, lambda: self.entry_status.configure(text=""))
 
     def _refresh_draft(self) -> None:
         for w in self.draft_box.winfo_children():
@@ -934,7 +988,7 @@ class CargoApp(ctk.CTk):
         self.clipboard_clear()
         self.clipboard_append(self._last_plan_text)
         self.copy_btn.configure(text="Copied ✓")
-        self.after(1500, lambda: self.copy_btn.configure(text="Copy"))
+        self._after(1500, lambda: self.copy_btn.configure(text="Copy"))
 
     # -- optimize / persistence -------------------------------------------
 
@@ -1005,4 +1059,15 @@ def run() -> None:
         ctk.deactivate_automatic_dpi_awareness()
     except Exception:
         pass
-    CargoApp().mainloop()
+    try:
+        app = CargoApp()
+    except Exception as e:
+        # Don't dump a stack trace on a packaged build -- show what went wrong.
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror("Star Citizen Cargo Stack — startup error",
+                             f"The app could not start:\n\n{e}")
+        root.destroy()
+        return
+    app.mainloop()

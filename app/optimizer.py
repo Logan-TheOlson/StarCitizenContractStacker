@@ -12,12 +12,15 @@ Strategy
 * The number of stops for a single trip that visits each needed location once is
   fixed (= number of distinct locations). So we first try to serve *all* legs in
   one trip via exact branch-and-bound; if any precedence/capacity-feasible order
-  exists, that is the fewest-stops solution and we pick the cheapest by time.
+  exists, that is the fewest-stops solution and we pick the cheapest by time,
+  breaking ties on the lowest peak load.
 * If one trip can't fit the cargo, we bin-pack legs into the *minimum* number of
   capacity-feasible trips (fewest trips => fewest stops) and optimize each trip's
   ordering independently.
 * Above a size threshold the exact search is skipped for a greedy
-  nearest-feasible heuristic so the UI never hangs.
+  nearest-feasible heuristic so the UI never hangs. The greedy result is then
+  validated; if it can't serve everything in one capacity-feasible pass we fall
+  back to the multi-trip bin-packing path rather than emit an invalid route.
 """
 
 from __future__ import annotations
@@ -102,6 +105,14 @@ def optimize(
             "Peak load exceeds ship capacity for a single trip; split into "
             "multiple runs (returning to reload)."
         )
+    # Last-resort safety net: if any planned run still peaks over capacity
+    # (only possible from a greedy fallback on a hard instance), say so rather
+    # than presenting an un-haulable route as fine.
+    if any(t.peak_scu > ship.scu_capacity for t in plan.trips):
+        plan.notes.append(
+            "Warning: a planned trip's peak load exceeds capacity; this route "
+            "may not be haulable exactly as ordered."
+        )
     return plan
 
 
@@ -113,7 +124,33 @@ def _best_order(
     locations = _distinct_locations(legs)
     if len(locations) <= EXACT_LIMIT:
         return _branch_and_bound(locations, cap, cost, start, legs)
-    return _greedy_order(legs, cap, cost, start)
+    # Above the exact limit we use the greedy heuristic. It does NOT guarantee a
+    # single-pass solution exists (e.g. a hub whose total pickup exceeds
+    # capacity), so only accept it as a one-trip plan when it genuinely delivers
+    # every leg within capacity. Otherwise return None so the caller bin-packs
+    # the legs into multiple capacity-feasible trips.
+    order = _greedy_order(legs, cap, cost, start)
+    return order if _route_feasible(order.sequence, legs, cap) else None
+
+
+def _route_feasible(sequence: list[str], legs: list[Leg], cap: int) -> bool:
+    """True if visiting ``sequence`` delivers every leg in precedence order
+    without ever exceeding ``cap`` -- same load/drop semantics as ``_build_trip``."""
+    by_pickup, by_dropoff = _index_legs(legs)
+    onboard = 0
+    loaded: set[int] = set()
+    dropped: set[int] = set()
+    for loc in sequence:
+        drops = [l for l in by_dropoff.get(loc, [])
+                 if id(l) in loaded and id(l) not in dropped]
+        picks = [l for l in by_pickup.get(loc, []) if id(l) not in loaded]
+        loaded |= {id(l) for l in picks}
+        dropped |= {id(l) for l in drops}
+        onboard -= sum(l.scu for l in drops)
+        onboard += sum(l.scu for l in picks)
+        if onboard > cap:
+            return False
+    return len(dropped) == len(legs)
 
 
 def _branch_and_bound(
@@ -127,13 +164,25 @@ def _branch_and_bound(
 
     best: _Order | None = None
     n = len(locations)
+    # Search budget. The first complete order is reached in ~n nodes, so this
+    # never blocks finding *a* solution; it only caps the extra exploration of
+    # equal-time orders done to minimise peak load (the capacity tiebreak),
+    # which on uniform-cost inputs could otherwise approach n! and hang the UI.
+    budget = 100_000
+    nodes = 0
 
     def recurse(seq, visited, loaded_legs: set[int], onboard, peak, minutes, last):
-        nonlocal best
-        if best is not None and minutes >= best.minutes:
+        nonlocal best, nodes
+        nodes += 1
+        if nodes > budget:
+            return
+        # Prune on strictly-greater time so equal-time orders still reach a leaf
+        # and can win on the lower-peak (capacity) tiebreak below.
+        if best is not None and minutes > best.minutes:
             return
         if len(seq) == n:
-            best = _Order(list(seq), minutes, peak)
+            if best is None or (minutes, peak) < (best.minutes, best.peak):
+                best = _Order(list(seq), minutes, peak)
             return
         for loc in locations:
             if loc in visited:
@@ -194,6 +243,19 @@ def _greedy_order(
         ]
         if not candidates:
             candidates = list(remaining)
+        # Prefer a stop we can FINISH in this visit: one where every drop still
+        # owed here is already onboard, so we deliver it and retire the location
+        # for good. Visiting a location that is also the dropoff of a leg we
+        # haven't loaded yet (e.g. an outbound-pickup hub that is also a later
+        # inbound dropoff) does only a partial pickup and forces a wasteful
+        # return trip. Defer those until they're completable; only fall back to
+        # an unfinishable visit when nothing is finishable (a genuine revisit).
+        finishable = [
+            c for c in candidates
+            if all(id(l) in loaded_legs for l in pending_drops(c))
+        ]
+        if finishable:
+            candidates = finishable
         # Avoid a no-op re-pick of the stop we just processed -- but NOT on the
         # first step, where ``last`` is the start hub we actually want to open
         # on (travel 0).
@@ -228,18 +290,22 @@ def _greedy_order(
 # --- multi-trip packing ---------------------------------------------------
 
 def _pack_trips(legs: list[Leg], cap: int) -> list[list[Leg]]:
-    """First-fit-decreasing bin packing that keeps dependency-compatible legs together.
+    """First-fit-decreasing bin packing that keeps *chained* legs together.
 
-    Legs that share a location as both pickup and dropoff must end up in the
-    same bin so the ordering can resolve the dependency correctly. We group
-    all legs that touch the same locations first, then bin-pack those groups.
+    Only a chain dependency forces two legs into the same trip: when one leg's
+    dropoff is another leg's pickup, visiting that hub drops cargo and frees
+    room for the pickup, so their peak load can stay below the sum and they may
+    fit a single run that revisits the hub. Legs that merely share a pickup (or
+    merely share a dropoff) are carried at the same time -- their peak *is* the
+    sum -- so they must stay splittable across trips when over capacity. We
+    group chained legs first, then bin-pack those groups by total SCU.
     """
-    # Build connected components: legs that share any location belong together.
+    # Build connected components over the chain relation only.
     components: list[set[int]] = []
     for i, leg in enumerate(legs):
         touching = {j for j, comp in enumerate(components)
-                    if any(legs[k].pickup in (leg.pickup, leg.dropoff) or
-                           legs[k].dropoff in (leg.pickup, leg.dropoff)
+                    if any(legs[k].dropoff == leg.pickup or
+                           legs[k].pickup == leg.dropoff
                            for k in comp)}
         if touching:
             merged: set[int] = {i}

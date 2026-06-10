@@ -71,7 +71,16 @@ class Leg:
 
     @property
     def scu(self) -> int:
-        return sum(c.scu for c in self.cargo)
+        # Cached: a leg's cargo is fixed once built, and this is read in the
+        # optimizer's hot loops. Call ``invalidate_scu()`` if cargo is mutated.
+        cached = self.__dict__.get("_scu")
+        if cached is None:
+            cached = sum(c.scu for c in self.cargo)
+            self.__dict__["_scu"] = cached
+        return cached
+
+    def invalidate_scu(self) -> None:
+        self.__dict__.pop("_scu", None)
 
     @property
     def commodity_summary(self) -> str:

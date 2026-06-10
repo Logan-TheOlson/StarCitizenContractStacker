@@ -39,6 +39,33 @@ def test_scraped_file_loads_and_costs() -> None:
               "not enough structure for tier check")
 
 
+def test_missing_and_corrupt_files_raise_clear_errors() -> None:
+    import tempfile
+
+    missing = Path(tempfile.gettempdir()) / "definitely_not_here_locations.json"
+    try:
+        load_locations(missing)
+    except RuntimeError as e:
+        assert "missing" in str(e).lower(), e
+    else:
+        raise AssertionError("missing file should raise RuntimeError")
+
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False,
+                                     encoding="utf-8") as f:
+        f.write("{ not valid json ]")
+        bad = Path(f.name)
+    try:
+        load_locations(bad)
+    except RuntimeError as e:
+        assert "corrupt" in str(e).lower(), e
+    else:
+        raise AssertionError("corrupt file should raise RuntimeError")
+    finally:
+        bad.unlink(missing_ok=True)
+    print("datastore error-handling OK")
+
+
 if __name__ == "__main__":
     test_scraped_file_loads_and_costs()
+    test_missing_and_corrupt_files_raise_clear_errors()
     print("scrape-load test passed.")

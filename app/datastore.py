@@ -22,17 +22,26 @@ def load_locations(
     """Return ``(locations_by_id, distances)`` from the JSON cache."""
 
     path = path or LOCATIONS_FILE
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    locations = {
-        loc["id"]: Location(
-            id=loc["id"],
-            name=loc["name"],
-            type=loc["type"],
-            system=loc["system"],
-            parent=loc.get("parent"),
-        )
-        for loc in raw["locations"]
-    }
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        location_rows = raw["locations"]
+    except FileNotFoundError as e:
+        raise RuntimeError(f"Location data file is missing: {path}") from e
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        raise RuntimeError(f"Location data file is corrupt: {path} ({e})") from e
+    try:
+        locations = {
+            loc["id"]: Location(
+                id=loc["id"],
+                name=loc["name"],
+                type=loc["type"],
+                system=loc["system"],
+                parent=loc.get("parent"),
+            )
+            for loc in location_rows
+        }
+    except (KeyError, TypeError) as e:
+        raise RuntimeError(f"Location data file has a bad entry: {path} ({e})") from e
     distances = {
         a: {b: float(m) for b, m in row.items()}
         for a, row in raw.get("distances", {}).items()
