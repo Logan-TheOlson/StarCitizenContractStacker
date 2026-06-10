@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:verseguide.com)",
+      "WebSearch",
+      "WebFetch(domain:starcitizen-api.com)"
+    ]
+  }
+}

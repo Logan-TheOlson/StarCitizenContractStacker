@@ -1,0 +1,6 @@
+# The core app + optimizer + GUI use only the Python standard library
+# (tkinter ships with python.org Windows builds). Nothing required to run main.py.
+
+# Needed only for the data scrapers in app/scraper/:
+requests>=2.31      # rsi_starmap.py
+playwright>=1.40    # verseguide.py  (then run: playwright install chromium)

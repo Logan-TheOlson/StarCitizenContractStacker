@@ -1,0 +1,223 @@
+{
+  "capacity": "500",
+  "start": "",
+  "letter_counter": 13,
+  "contracts": [
+    {
+      "letter": "B",
+      "pickup": "HUR_L2",
+      "reward": 50250,
+      "cargo": [
+        {
+          "commodity": "Silicon",
+          "scu": 9,
+          "dropoff": "HUR_L5",
+          "boxes": {
+            "1": 9
+          }
+        }
+      ]
+    },
+    {
+      "letter": "C",
+      "pickup": "EVERUS_HARBOR",
+      "reward": 60750,
+      "cargo": [
+        {
+          "commodity": "Stims",
+          "scu": 3,
+          "dropoff": "HUR_L1",
+          "boxes": {}
+        },
+        {
+          "commodity": "Stims",
+          "scu": 2,
+          "dropoff": "HUR_L2",
+          "boxes": {}
+        },
+        {
+          "commodity": "Stims",
+          "scu": 4,
+          "dropoff": "HUR_L4",
+          "boxes": {}
+        }
+      ]
+    },
+    {
+      "letter": "D",
+      "pickup": "EVERUS_HARBOR",
+      "reward": 100500,
+      "cargo": [
+        {
+          "commodity": "Pressurized Ice",
+          "scu": 5,
+          "dropoff": "HUR_L3",
+          "boxes": {}
+        },
+        {
+          "commodity": "Processed Food",
+          "scu": 6,
+          "dropoff": "HUR_L1",
+          "boxes": {}
+        },
+        {
+          "commodity": "Pressurized Ice",
+          "scu": 7,
+          "dropoff": "HUR_L5",
+          "boxes": {}
+        },
+        {
+          "commodity": "Processed Food",
+          "scu": 4,
+          "dropoff": "HUR_L2",
+          "boxes": {}
+        }
+      ]
+    },
+    {
+      "letter": "F",
+      "pickup": "EVERUS_HARBOR",
+      "reward": 81250,
+      "cargo": [
+        {
+          "commodity": "Pressurized Ice",
+          "scu": 5,
+          "dropoff": "HUR_L5",
+          "boxes": {}
+        },
+        {
+          "commodity": "Pressurized Ice",
+          "scu": 7,
+          "dropoff": "HUR_L3",
+          "boxes": {}
+        },
+        {
+          "commodity": "Processed Foods",
+          "scu": 6,
+          "dropoff": "HUR_L1",
+          "boxes": {}
+        },
+        {
+          "commodity": "Processed Foods",
+          "scu": 6,
+          "dropoff": "HUR_L5",
+          "boxes": {}
+        }
+      ]
+    },
+    {
+      "letter": "G",
+      "pickup": "EVERUS_HARBOR",
+      "reward": 51000,
+      "cargo": [
+        {
+          "commodity": "Pressurized Ice",
+          "scu": 7,
+          "dropoff": "HUR_L1",
+          "boxes": {}
+        },
+        {
+          "commodity": "Pressurized Ice",
+          "scu": 5,
+          "dropoff": "HUR_L5",
+          "boxes": {}
+        },
+        {
+          "commodity": "Processed Foods",
+          "scu": 4,
+          "dropoff": "HUR_L1",
+          "boxes": {}
+        },
+        {
+          "commodity": "Processed Food",
+          "scu": 7,
+          "dropoff": "HUR_L5",
+          "boxes": {}
+        }
+      ]
+    },
+    {
+      "letter": "H",
+      "pickup": "EVERUS_HARBOR",
+      "reward": 72500,
+      "cargo": [
+        {
+          "commodity": "Stims",
+          "scu": 3,
+          "dropoff": "HUR_L4",
+          "boxes": {}
+        },
+        {
+          "commodity": "Stims",
+          "scu": 2,
+          "dropoff": "HUR_L1",
+          "boxes": {}
+        },
+        {
+          "commodity": "Stims",
+          "scu": 2,
+          "dropoff": "HUR_L3",
+          "boxes": {}
+        },
+        {
+          "commodity": "Stims",
+          "scu": 3,
+          "dropoff": "HUR_L2",
+          "boxes": {}
+        }
+      ]
+    },
+    {
+      "letter": "J",
+      "pickup": "HUR_L2",
+      "reward": 60750,
+      "cargo": [
+        {
+          "commodity": "Waste",
+          "scu": 3,
+          "dropoff": "EVERUS_HARBOR",
+          "boxes": {}
+        }
+      ]
+    },
+    {
+      "letter": "K",
+      "pickup": "HUR_L1",
+      "reward": 50250,
+      "cargo": [
+        {
+          "commodity": "Waste",
+          "scu": 4,
+          "dropoff": "EVERUS_HARBOR",
+          "boxes": {}
+        }
+      ]
+    },
+    {
+      "letter": "L",
+      "pickup": "HUR_L4",
+      "reward": 72500,
+      "cargo": [
+        {
+          "commodity": "Waste",
+          "scu": 3,
+          "dropoff": "EVERUS_HARBOR",
+          "boxes": {}
+        }
+      ]
+    },
+    {
+      "letter": "M",
+      "pickup": "HUR_L5",
+      "reward": 48500,
+      "cargo": [
+        {
+          "commodity": "Waste",
+          "scu": 8,
+          "dropoff": "EVERUS_HARBOR",
+          "boxes": {}
+        }
+      ]
+    }
+  ]
+}

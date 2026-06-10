@@ -1,0 +1,335 @@
+{
+  "_comment": "Scraped from verseguide.com via app/scraper/verseguide.py. Hierarchy only (planets/moons/lagrange/jumppoints); surface outposts and route distances not yet included.",
+  "distances": {},
+  "locations": [
+    {
+      "id": "PYRO",
+      "name": "Pyro",
+      "type": "system",
+      "system": "PYRO",
+      "parent": null
+    },
+    {
+      "id": "PYRO.I",
+      "name": "Pyro I",
+      "type": "planet",
+      "system": "PYRO",
+      "parent": "PYRO"
+    },
+    {
+      "id": "PYRO.I.1",
+      "name": "P1 L1",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.I"
+    },
+    {
+      "id": "PYRO.I.2",
+      "name": "P1 L2",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.I"
+    },
+    {
+      "id": "PYRO.I.3",
+      "name": "P1 L3",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.I"
+    },
+    {
+      "id": "PYRO.I.4",
+      "name": "P1 L4",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.I"
+    },
+    {
+      "id": "PYRO.I.5",
+      "name": "P1 L5",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.I"
+    },
+    {
+      "id": "PYRO.II",
+      "name": "Monox",
+      "type": "planet",
+      "system": "PYRO",
+      "parent": "PYRO"
+    },
+    {
+      "id": "PYRO.II.1",
+      "name": "P2 L1",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.II"
+    },
+    {
+      "id": "PYRO.II.2",
+      "name": "P2 L2",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.II"
+    },
+    {
+      "id": "PYRO.II.3",
+      "name": "P2 L3",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.II"
+    },
+    {
+      "id": "PYRO.II.4",
+      "name": "P2 L4",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.II"
+    },
+    {
+      "id": "PYRO.II.5",
+      "name": "P2 L5",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.II"
+    },
+    {
+      "id": "PYRO.III",
+      "name": "Bloom",
+      "type": "planet",
+      "system": "PYRO",
+      "parent": "PYRO"
+    },
+    {
+      "id": "PYRO.III.1",
+      "name": "P3 L1",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.III"
+    },
+    {
+      "id": "PYRO.III.2",
+      "name": "P3 L2",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.III"
+    },
+    {
+      "id": "PYRO.III.3",
+      "name": "P3 L3",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.III"
+    },
+    {
+      "id": "PYRO.III.4",
+      "name": "P3 L4",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.III"
+    },
+    {
+      "id": "PYRO.III.5",
+      "name": "P3 L5",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.III"
+    },
+    {
+      "id": "PYRO.IV",
+      "name": "Pyro IV",
+      "type": "planet",
+      "system": "PYRO",
+      "parent": "PYRO"
+    },
+    {
+      "id": "PYRO.V",
+      "name": "Pyro V",
+      "type": "planet",
+      "system": "PYRO",
+      "parent": "PYRO"
+    },
+    {
+      "id": "PYRO.5A",
+      "name": "Ignis",
+      "type": "moon",
+      "system": "PYRO",
+      "parent": "PYRO.V"
+    },
+    {
+      "id": "PYRO.5B",
+      "name": "Vatra",
+      "type": "moon",
+      "system": "PYRO",
+      "parent": "PYRO.V"
+    },
+    {
+      "id": "PYRO.5C",
+      "name": "Adir",
+      "type": "moon",
+      "system": "PYRO",
+      "parent": "PYRO.V"
+    },
+    {
+      "id": "PYRO.5D",
+      "name": "Fairo",
+      "type": "moon",
+      "system": "PYRO",
+      "parent": "PYRO.V"
+    },
+    {
+      "id": "PYRO.5E",
+      "name": "Fuego",
+      "type": "moon",
+      "system": "PYRO",
+      "parent": "PYRO.V"
+    },
+    {
+      "id": "PYRO.5F",
+      "name": "Vuur",
+      "type": "moon",
+      "system": "PYRO",
+      "parent": "PYRO.V"
+    },
+    {
+      "id": "PYRO.V.1",
+      "name": "P5 L1",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.V"
+    },
+    {
+      "id": "PYRO.V.2",
+      "name": "P5 L2",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.V"
+    },
+    {
+      "id": "PYRO.V.3",
+      "name": "P5 L3",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.V"
+    },
+    {
+      "id": "PYRO.V.4",
+      "name": "P5 L4",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.V"
+    },
+    {
+      "id": "PYRO.V.5",
+      "name": "P5 L5",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.V"
+    },
+    {
+      "id": "PYRO.VI",
+      "name": "Terminus",
+      "type": "planet",
+      "system": "PYRO",
+      "parent": "PYRO"
+    },
+    {
+      "id": "PYRO.VI.1",
+      "name": "P6 L1",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.VI"
+    },
+    {
+      "id": "PYRO.VI.2",
+      "name": "P6 L2",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.VI"
+    },
+    {
+      "id": "PYRO.VI.3",
+      "name": "P6 L3",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.VI"
+    },
+    {
+      "id": "PYRO.VI.4",
+      "name": "P6 L4",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.VI"
+    },
+    {
+      "id": "PYRO.VI.5",
+      "name": "P6 L5",
+      "type": "lagrange",
+      "system": "PYRO",
+      "parent": "PYRO.VI"
+    },
+    {
+      "id": "PYRO.JP.STANTON",
+      "name": "Pyro - Stanton",
+      "type": "jumppoint",
+      "system": "PYRO",
+      "parent": "PYRO"
+    },
+    {
+      "id": "PYRO.JP.NYX",
+      "name": "Pyro - Nyx",
+      "type": "jumppoint",
+      "system": "PYRO",
+      "parent": "PYRO"
+    },
+    {
+      "id": "NYX",
+      "name": "Nyx",
+      "type": "system",
+      "system": "NYX",
+      "parent": null
+    },
+    {
+      "id": "NYX.I",
+      "name": "Nyx I",
+      "type": "planet",
+      "system": "NYX",
+      "parent": "NYX"
+    },
+    {
+      "id": "NYX.II",
+      "name": "Nyx II",
+      "type": "planet",
+      "system": "NYX",
+      "parent": "NYX"
+    },
+    {
+      "id": "NYX.III",
+      "name": "Nyx III",
+      "type": "planet",
+      "system": "NYX",
+      "parent": "NYX"
+    },
+    {
+      "id": "NYX.DELAMAR",
+      "name": "Delamar",
+      "type": "outpost",
+      "system": "NYX",
+      "parent": "NYX"
+    },
+    {
+      "id": "NYX.JP.CASTRA",
+      "name": "Nyx - Castra",
+      "type": "jumppoint",
+      "system": "NYX",
+      "parent": "NYX"
+    },
+    {
+      "id": "NYX.JP.PYRO",
+      "name": "Nyx - Pyro",
+      "type": "jumppoint",
+      "system": "NYX",
+      "parent": "NYX"
+    }
+  ]
+}

@@ -1,0 +1,1008 @@
+"""Modern CustomTkinter UI for the cargo route optimizer.
+
+Designed to sit next to Star Citizen on a second monitor or behind an alt-tab,
+so the layout favours **fast contract entry** and a **glanceable route**:
+
+    left pane   ->  enter contracts (sticky pickup, keyboard-driven) + ledger
+    right pane  ->  the optimized route, rendered into a fast native tk.Text
+
+Workflow (still Contract -> Cargo, two-stage):
+
+1. Set the contract pickup (it stays put between contracts at the same hub) and
+   optional reward.
+2. Add cargo lines: commodity + SCU + dropoff (+ optional box sizes). Enter on
+   the SCU/boxes field drops the line in; each line shows with a one-click ✕.
+3. "Add contract" (or Ctrl+Enter) locks the letter (A, B, C…) into the ledger.
+4. "Optimize route" plans across the whole ledger; each stop lists its DROP/LOAD
+   orders (grouped by contract, with a tick-off checkbox per group) and a
+   right-aligned capacity bar. "Copy" yanks a plain text version.
+
+The "Overlay" switch collapses everything to a small, always-on-top route-only
+window (no entry pane, stats, bars or checked-off orders) for use beside the
+game.
+
+Dark theme, rounded cards, light-blue accent. Locations use a search-first
+picker showing the full System › Planet › Moon › Site path.
+"""
+
+from __future__ import annotations
+
+import sys
+import tkinter as tk
+from pathlib import Path
+
+import customtkinter as ctk
+
+from ..cost import CostModel
+from ..datastore import load_locations, selectable_locations
+from ..models import CargoItem, Contract, Leg, Ship
+from ..optimizer import optimize
+from ..report import format_plan
+
+# --- palette: dark surfaces + light-blue accent --------------------------
+ACCENT = "#4FA6E8"
+ACCENT_HOVER = "#3E8FCC"
+ACCENT_TEXT = "#0c1a24"
+WINDOW_BG = "#1b1e23"
+CARD_BG = "#23272e"
+FIELD_BG = "#2b3038"
+CHIP_BG = "#2f3742"
+TEXT = "#E5E9F0"
+MUTED = "#9aa4b2"
+LOAD_GREEN = "#5BD6A6"
+DROP_BLUE = "#7CC0F2"
+DANGER = "#E8746B"
+TRACK_BG = "#323a45"
+
+# Common Stanton hauling commodities — drives the commodity autocomplete. Free
+# text is still allowed for anything not listed.
+COMMODITIES = sorted([
+    "Agricium", "Agricultural Supplies", "Aluminum", "Aphorite", "Astatine",
+    "Beryl", "Bexalite", "Carbon", "Chlorine", "Construction Materials",
+    "Copper", "Corundum", "Diamond", "Distilled Spirits", "Dolivine",
+    "Fluorine", "Gold", "Hephaestanite", "Hydrogen", "Iodine", "Iron",
+    "Laranite", "Medical Supplies", "Pressurized Ice", "Processed Food",
+    "Quantanium", "Quartz", "Recycled Material Composite", "Scrap", "Silicon",
+    "Stims", "Titanium", "Tin", "Tungsten", "Waste",
+])
+
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
+
+
+def _asset(name: str) -> Path:
+    """Locate a bundled asset, both in dev and inside a PyInstaller build."""
+    base = getattr(sys, "_MEIPASS", None)
+    if base:                                  # frozen: assets/ sits at _MEIPASS
+        return Path(base) / "assets" / name
+    return Path(__file__).resolve().parents[2] / "assets" / name
+
+
+def parse_boxes(text: str) -> dict[int, int]:
+    """Parse '32x1, 16x2' -> {32: 1, 16: 2}. Empty -> {}."""
+
+    boxes: dict[int, int] = {}
+    for chunk in text.replace(";", ",").split(","):
+        chunk = chunk.strip().lower()
+        if not chunk:
+            continue
+        if "x" not in chunk:
+            raise ValueError(f"Box entry '{chunk}' must look like '32x1'.")
+        size_s, count_s = chunk.split("x", 1)
+        boxes[int(size_s)] = boxes.get(int(size_s), 0) + int(count_s)
+    return boxes
+
+
+def _index_to_letters(n: int) -> str:
+    """0->A, 25->Z, 26->AA (spreadsheet-style, so we never run out)."""
+
+    s = ""
+    n += 1
+    while n > 0:
+        n, r = divmod(n - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
+class LocationPicker(ctk.CTkFrame):
+    """Search-first field with a hierarchy-path dropdown.
+
+    Generic over ``(label, value)`` options. With ``allow_free=True`` the typed
+    text is returned verbatim when it matches no option (used for commodities).
+    """
+
+    MAX_RESULTS = 14
+
+    def __init__(self, master, options, placeholder="Type to search…",
+                 width=320, on_choose=None, allow_free=False, variable=None):
+        super().__init__(master, fg_color="transparent")
+        self.options = options
+        self.allow_free = allow_free
+        self._id = None
+        self._matches = []
+        self._on_choose = on_choose
+        self.var = variable or tk.StringVar()
+        self.entry = ctk.CTkEntry(self, textvariable=self.var, width=width,
+                                  fg_color=FIELD_BG, border_color=FIELD_BG,
+                                  placeholder_text=placeholder)
+        self.entry.pack(fill="x")
+        self.entry.bind("<KeyRelease>", self._on_key)
+        self.entry.bind("<Button-1>", lambda _e: self._show())
+        self.entry.bind("<Down>", self._enter_list)
+        self.entry.bind("<Return>", self._on_return)
+        self.entry.bind("<FocusOut>", lambda _e: self.after(150, self._close))
+        self.popup = None
+        self.listbox = None
+
+    def get_id(self):
+        if self._id is None:
+            text = self.var.get().strip()
+            for label, lid in self.options:
+                if label.lower() == text.lower():
+                    self._id = lid
+                    break
+            if self._id is None and self.allow_free and text:
+                return text
+        return self._id
+
+    def set_by_id(self, loc_id):
+        self._id = loc_id or None
+        self.var.set("")
+        if loc_id:
+            for label, lid in self.options:
+                if lid == loc_id:
+                    self.var.set(label)
+                    return
+            if self.allow_free:
+                self.var.set(loc_id)
+
+    def clear(self):
+        self._id = None
+        self.var.set("")
+
+    def _on_key(self, event):
+        if event.keysym in ("Up", "Down", "Return", "Escape", "Tab"):
+            if event.keysym == "Escape":
+                self._close()
+            return
+        self._id = None
+        self._show()
+
+    def _show(self):
+        tokens = [t for t in self.var.get().lower().split() if t]
+        matches = [o for o in self.options
+                   if all(t in o[0].lower() for t in tokens)] if tokens else self.options
+        matches = matches[:self.MAX_RESULTS]
+        if not matches:
+            self._close()
+            return
+        self._matches = matches
+        self._open()
+        self.listbox.delete(0, "end")
+        for label, _ in matches:
+            self.listbox.insert("end", label)
+        self.listbox.selection_clear(0, "end")
+        self.listbox.selection_set(0)
+
+    def _open(self):
+        if self.popup is not None:
+            self._position()
+            return
+        self.popup = tk.Toplevel(self)
+        self.popup.wm_overrideredirect(True)
+        self.popup.attributes("-topmost", True)
+        self.listbox = tk.Listbox(
+            self.popup, activestyle="none", bg=FIELD_BG, fg=TEXT,
+            selectbackground=ACCENT, selectforeground=ACCENT_TEXT,
+            highlightthickness=1, highlightbackground=ACCENT, borderwidth=0,
+            font=("Segoe UI", 10), height=self.MAX_RESULTS)
+        self.listbox.pack(fill="both", expand=True)
+        self.listbox.bind("<Return>", lambda _e: self._accept())
+        self.listbox.bind("<Double-Button-1>", lambda _e: self._accept())
+        self.listbox.bind("<ButtonRelease-1>", self._click)
+        self.listbox.bind("<Escape>", lambda _e: self._close())
+        self._position()
+
+    def _position(self):
+        self.update_idletasks()
+        x = self.entry.winfo_rootx()
+        y = self.entry.winfo_rooty() + self.entry.winfo_height() + 2
+        w = self.entry.winfo_width()
+        rows = max(1, min(len(self._matches), self.MAX_RESULTS))
+        self.listbox.configure(height=rows)
+        self.popup.wm_geometry(f"{w}x{rows * 22 + 6}+{x}+{y}")
+
+    def _on_return(self, _event):
+        # Enter accepts the highlighted autofill match when the list is open.
+        if self.popup is not None and self.listbox is not None:
+            self._accept()
+            return "break"
+
+    def _enter_list(self, _event):
+        if self.popup is None:
+            self._show()
+        if self.listbox is not None:
+            self.listbox.focus_set()
+            self.listbox.selection_clear(0, "end")
+            self.listbox.selection_set(0)
+            self.listbox.activate(0)
+
+    def _click(self, event):
+        if self.listbox is not None:
+            self.listbox.selection_clear(0, "end")
+            self.listbox.selection_set(self.listbox.nearest(event.y))
+            self._accept()
+
+    def _accept(self):
+        if not self.listbox or not self.listbox.curselection():
+            return
+        label, loc_id = self._matches[self.listbox.curselection()[0]]
+        self._id = loc_id
+        self.var.set(label)
+        self._close()
+        self.entry.focus_set()
+        self.entry.icursor("end")
+        if self._on_choose:
+            self._on_choose()
+
+    def _close(self):
+        if self.popup is not None:
+            self.popup.destroy()
+            self.popup = None
+            self.listbox = None
+
+
+# --- small widget helpers -------------------------------------------------
+
+def _label(master, text, **kw):
+    return ctk.CTkLabel(master, text=text, text_color=MUTED,
+                        font=ctk.CTkFont(size=12), **kw)
+
+
+def _section(master, text):
+    return ctk.CTkLabel(master, text=text, text_color=ACCENT,
+                        font=ctk.CTkFont(size=12, weight="bold"))
+
+
+def _card(master) -> ctk.CTkFrame:
+    return ctk.CTkFrame(master, fg_color=CARD_BG, corner_radius=14)
+
+
+def _entry(master, var, width, placeholder=""):
+    return ctk.CTkEntry(master, textvariable=var, width=width, fg_color=FIELD_BG,
+                        border_color=FIELD_BG, placeholder_text=placeholder)
+
+
+def _accent_btn(master, text, cmd, **kw):
+    kw.setdefault("font", ctk.CTkFont(size=13, weight="bold"))
+    return ctk.CTkButton(master, text=text, command=cmd, fg_color=ACCENT,
+                         hover_color=ACCENT_HOVER, text_color=ACCENT_TEXT, **kw)
+
+
+def _ghost_btn(master, text, cmd, **kw):
+    return ctk.CTkButton(master, text=text, command=cmd, fg_color=FIELD_BG,
+                         hover_color="#343b45", text_color=TEXT, **kw)
+
+
+class CargoApp(ctk.CTk):
+    def __init__(self) -> None:
+        super().__init__()
+        self.title("Star Citizen Cargo Stack")
+        self.geometry("1240x820")
+        self.minsize(1060, 680)
+        self.configure(fg_color=WINDOW_BG)
+        self._set_window_icon()
+
+        self.locations, self.distances = load_locations()
+        self.cost = CostModel(self.locations, self.distances)
+        self.loc_options = self._build_options()
+        self.commodity_options = [(c, c) for c in COMMODITIES]
+
+        # state -----------------------------------------------------------
+        self.contracts: list[Contract] = []      # the locked-in ledger
+        self.draft_cargo: list[CargoItem] = []    # cargo of the contract in progress
+        self._letter_counter = 0
+        self._last_plan = None
+        self._last_plan_text = ""
+        self._checked: set[int] = set()   # ticked-off order ids (route view)
+
+        # vars the tests + entry rows bind to
+        self.cap_var = tk.StringVar(value="120")
+        self.reward_var = tk.StringVar()
+        self.commodity_var = tk.StringVar()
+        self.amount_var = tk.StringVar()
+        self.boxes_var = tk.StringVar()
+        self.overlay_var = tk.BooleanVar(value=False)
+        self._overlay = False
+
+        self._build()
+        self.bind("<Control-Return>", lambda _e: self._add_contract())
+
+    # -- data helpers ------------------------------------------------------
+
+    def _name(self, loc_id: str) -> str:
+        loc = self.locations.get(loc_id)
+        return loc.name if loc else (loc_id or "—")
+
+    def _path_label(self, loc_id: str) -> str:
+        parts, cur, seen = [], loc_id, set()
+        while cur and cur not in seen:
+            seen.add(cur)
+            loc = self.locations.get(cur)
+            if not loc:
+                break
+            parts.append(loc.name)
+            cur = loc.parent
+        return " › ".join(reversed(parts))
+
+    def _build_options(self):
+        opts = [(self._path_label(l.id), l.id)
+                for l in selectable_locations(self.locations)]
+        opts.sort(key=lambda o: o[0].lower())
+        return opts
+
+    # -- layout ------------------------------------------------------------
+
+    def _build(self) -> None:
+        self.grid_rowconfigure(1, weight=1)
+        self.grid_columnconfigure(0, weight=5, uniform="cols")
+        self.grid_columnconfigure(1, weight=6, uniform="cols")
+
+        self._build_header()
+
+        # Plain frame (not scrollable) so it doesn't nest a scroll region
+        # around the ledger's own scroll — nested CTkScrollableFrames are the
+        # main cause of sluggish scrolling/redraw.
+        self.left = ctk.CTkFrame(self, fg_color="transparent")
+        self.left.grid(row=1, column=0, sticky="nsew", padx=(14, 7), pady=(0, 12))
+        self._build_entry_card(self.left)
+        self._build_ledger_card(self.left)
+
+        self.right = _card(self)
+        self.right.grid(row=1, column=1, sticky="nsew", padx=(7, 14), pady=(0, 12))
+        self._build_route_pane(self.right)
+
+        self._refresh_contract_label()
+        self._refresh_draft()
+        self._refresh_ledger()
+        self._render_route_placeholder()
+
+    def _build_header(self) -> None:
+        head = ctk.CTkFrame(self, fg_color="transparent")
+        head.grid(row=0, column=0, columnspan=2, sticky="ew", padx=18,
+                  pady=(14, 8))
+        self.head = head
+
+        self.title_box = ctk.CTkFrame(head, fg_color="transparent")
+        self.title_box.pack(side="left")
+        ctk.CTkLabel(self.title_box, text="Star Citizen Cargo Stack",
+                     text_color=TEXT,
+                     font=ctk.CTkFont(size=23, weight="bold")).pack(side="left")
+        ctk.CTkLabel(self.title_box, text="  route optimizer", text_color=ACCENT,
+                     font=ctk.CTkFont(size=14)).pack(side="left", pady=(6, 0))
+
+        ctk.CTkSwitch(head, text="Overlay", variable=self.overlay_var,
+                      command=self._toggle_overlay, progress_color=ACCENT,
+                      text_color=MUTED, font=ctk.CTkFont(size=12, weight="bold")
+                      ).pack(side="right", padx=(12, 0))
+
+        self.cap_wrap = ctk.CTkFrame(head, fg_color="transparent")
+        self.cap_wrap.pack(side="right")
+        _label(self.cap_wrap, "Capacity SCU").pack(side="left", padx=(0, 6))
+        _entry(self.cap_wrap, self.cap_var, 80).pack(side="left")
+        _label(self.cap_wrap, "Start").pack(side="left", padx=(16, 6))
+        self.start_picker = LocationPicker(self.cap_wrap, self.loc_options,
+                                           width=240,
+                                           placeholder="current location…")
+        self.start_picker.pack(side="left")
+
+    def _set_window_icon(self) -> None:
+        ico = _asset("icon.ico")
+        try:
+            if ico.exists():
+                self.iconbitmap(default=str(ico))   # title bar + taskbar
+        except Exception:
+            pass
+
+    def _toggle_overlay(self) -> None:
+        """Toggle a minimal, always-on-top overlay: just the stop list (no
+        stats, no capacity bars, no Copy)."""
+        on = bool(self.overlay_var.get())
+        self._overlay = on
+        self.attributes("-topmost", on)
+        if on:
+            # remember the full-window geometry so we can restore it
+            self._normal_geometry = self.geometry()
+            self.left.grid_remove()
+            self.title_box.pack_forget()
+            self.cap_wrap.pack_forget()
+            self.copy_btn.pack_forget()
+            self.stats_wrap.pack_forget()
+            self.head.grid_configure(pady=(8, 4))
+            # route pane takes the whole width
+            self.right.grid_configure(column=0, columnspan=2, padx=14)
+            self.minsize(280, 340)
+            self.geometry("360x680")
+        else:
+            self.left.grid()
+            self.right.grid_configure(column=1, columnspan=1, padx=(7, 14))
+            self.cap_wrap.pack(side="right")
+            self.title_box.pack(side="left")
+            self.copy_btn.pack(side="right")
+            self.stats_wrap.pack(fill="x", padx=12, pady=(0, 2),
+                                 before=self.route_body)
+            self.head.grid_configure(pady=(14, 8))
+            self.minsize(1060, 680)
+            self.geometry(getattr(self, "_normal_geometry", "1240x820"))
+        # re-render so stop rows pick up / drop the capacity bars
+        if self._rt_ctx:
+            self._render_route(*self._rt_ctx)
+
+    # -- contract entry ----------------------------------------------------
+
+    def _build_entry_card(self, parent) -> None:
+        card = _card(parent)
+        card.pack(fill="x", pady=(0, 12))
+        self.contract_label = _section(card, "NEW CONTRACT — A")
+        self.contract_label.pack(anchor="w", padx=16, pady=(12, 6))
+
+        top = ctk.CTkFrame(card, fg_color="transparent")
+        top.pack(fill="x", padx=12)
+        _label(top, "Pickup (stays for the next contract)").grid(
+            row=0, column=0, padx=6, sticky="w")
+        self.cpickup_picker = LocationPicker(top, self.loc_options, width=320)
+        self.cpickup_picker.grid(row=1, column=0, padx=6, pady=(0, 8), sticky="w")
+        _label(top, "Reward aUEC").grid(row=0, column=1, padx=6, sticky="w")
+        _entry(top, self.reward_var, 130).grid(row=1, column=1, padx=6,
+                                               pady=(0, 8), sticky="w")
+
+        ctk.CTkFrame(card, height=1, fg_color=FIELD_BG).pack(
+            fill="x", padx=16, pady=(4, 8))
+
+        # --- cargo entry: one row, a label above each field --------------
+        _label(card, "Add cargo  ·  Enter to add line").pack(
+            anchor="w", padx=16, pady=(0, 2))
+        row = ctk.CTkFrame(card, fg_color="transparent")
+        row.pack(fill="x", padx=12, pady=(0, 2))
+        _label(row, "Commodity").grid(row=0, column=0, padx=4, sticky="w")
+        _label(row, "SCU").grid(row=0, column=1, padx=4, sticky="w")
+        _label(row, "Dropoff").grid(row=0, column=2, padx=4, sticky="w")
+        _label(row, "Boxes").grid(row=0, column=3, padx=4, sticky="w")
+        self.commodity_picker = LocationPicker(
+            row, self.commodity_options, width=130, allow_free=True,
+            variable=self.commodity_var, placeholder="commodity…")
+        self.commodity_picker.grid(row=1, column=0, padx=4, pady=(0, 6), sticky="w")
+        amt = _entry(row, self.amount_var, 52, "SCU")
+        amt.grid(row=1, column=1, padx=4, pady=(0, 6), sticky="w")
+        self.cdropoff_picker = LocationPicker(row, self.loc_options, width=140,
+                                              placeholder="dropoff…")
+        self.cdropoff_picker.grid(row=1, column=2, padx=4, pady=(0, 6), sticky="w")
+        boxes = _entry(row, self.boxes_var, 60, "32x1")
+        boxes.grid(row=1, column=3, padx=4, pady=(0, 6), sticky="w")
+        _accent_btn(row, "+ Add", self._add_cargo, width=70).grid(
+            row=1, column=4, padx=4, pady=(0, 6), sticky="w")
+        for w in (amt, boxes):
+            w.bind("<Return>", lambda _e: self._add_cargo())
+
+        # draft cargo lines (one-click ✕ each)
+        self.draft_box = ctk.CTkFrame(card, fg_color="transparent")
+        self.draft_box.pack(fill="x", padx=12, pady=(2, 2))
+
+        self.entry_status = ctk.CTkLabel(card, text="", text_color=DANGER,
+                                         font=ctk.CTkFont(size=11))
+        self.entry_status.pack(anchor="w", padx=16)
+
+        _accent_btn(card, "✓  Add contract   (Ctrl+Enter)", self._add_contract,
+                    height=36).pack(fill="x", padx=16, pady=(6, 14))
+
+    def _flash(self, msg: str) -> None:
+        self.entry_status.configure(text=msg)
+        if msg:
+            self.after(3500, lambda: self.entry_status.configure(text=""))
+
+    def _refresh_draft(self) -> None:
+        for w in self.draft_box.winfo_children():
+            w.destroy()
+        if not self.draft_cargo:
+            _label(self.draft_box, "No cargo added yet.").pack(anchor="w", padx=4)
+            return
+        for i, item in enumerate(self.draft_cargo):
+            line = ctk.CTkFrame(self.draft_box, fg_color=FIELD_BG, corner_radius=8)
+            line.pack(fill="x", pady=2)
+            ctk.CTkButton(line, text="✕", width=26, height=26, fg_color="transparent",
+                          hover_color=DANGER, text_color=MUTED,
+                          command=lambda idx=i: self._remove_cargo_at(idx)).pack(
+                side="right", padx=4, pady=2)
+            boxes = ", ".join(f"{s}x{n}" for s, n in sorted(item.boxes.items(),
+                                                            reverse=True))
+            extra = f"  ·  {boxes}" if boxes else ""
+            ctk.CTkLabel(
+                line, text=f"{item.commodity} × {item.scu} SCU  →  "
+                           f"{self._name(item.dropoff)}{extra}",
+                text_color=TEXT, font=ctk.CTkFont(size=12), anchor="w").pack(
+                side="left", padx=10, pady=3)
+
+    def _remove_cargo_at(self, idx: int) -> None:
+        if 0 <= idx < len(self.draft_cargo):
+            del self.draft_cargo[idx]
+            self._refresh_draft()
+
+    def _add_cargo(self) -> None:
+        commodity = self.commodity_var.get().strip() or "Cargo"
+        dropoff = self.cdropoff_picker.get_id()
+        if not dropoff:
+            self._flash("Select a dropoff location for this cargo.")
+            return
+        try:
+            boxes = parse_boxes(self.boxes_var.get())
+        except ValueError as e:
+            self._flash(str(e))
+            return
+        amount_text = self.amount_var.get().strip()
+        if amount_text:
+            try:
+                scu = int(amount_text)
+            except ValueError:
+                self._flash("SCU amount must be a whole number.")
+                return
+        elif boxes:
+            scu = sum(s * n for s, n in boxes.items())
+        else:
+            self._flash("Enter an SCU amount or box sizes.")
+            return
+        if scu <= 0:
+            self._flash("SCU amount must be positive.")
+            return
+        self.draft_cargo.append(CargoItem(commodity, scu, dropoff, boxes))
+        self._refresh_draft()
+        self.commodity_picker.clear()
+        self.amount_var.set("")
+        self.boxes_var.set("")
+        self.cdropoff_picker.clear()
+        self._flash("")
+        self.commodity_picker.entry.focus_set()
+
+    def _add_contract(self) -> None:
+        if not self.draft_cargo:
+            self._flash("Add at least one cargo line first.")
+            return
+        if not self.cpickup_picker.get_id():
+            self._flash("Set the contract's pickup location.")
+            return
+        reward_text = self.reward_var.get().strip().replace(",", "")
+        try:
+            reward = int(reward_text) if reward_text else 0
+        except ValueError:
+            self._flash("Reward must be a whole number.")
+            return
+        letter = _index_to_letters(self._letter_counter)
+        self._letter_counter += 1
+        self.contracts.append(Contract(
+            letter=letter, pickup=self.cpickup_picker.get_id(),
+            cargo=list(self.draft_cargo), reward=reward))
+        # reset the draft; keep the pickup sticky for the next contract
+        self.draft_cargo = []
+        self.reward_var.set("")
+        self.cdropoff_picker.clear()
+        self._refresh_draft()
+        self._refresh_ledger()
+        self._refresh_contract_label()
+        self._flash("")
+
+    # -- ledger ------------------------------------------------------------
+
+    def _build_ledger_card(self, parent) -> None:
+        card = _card(parent)
+        card.pack(fill="both", expand=True)
+        head = ctk.CTkFrame(card, fg_color="transparent")
+        head.pack(fill="x", padx=16, pady=(12, 4))
+        _section(head, "LEDGER").pack(side="left")
+        self.ledger_count = _label(head, "")
+        self.ledger_count.pack(side="left", padx=(8, 0))
+
+        self.ledger_box = ctk.CTkScrollableFrame(card, fg_color="transparent",
+                                                 height=180)
+        self.ledger_box.pack(fill="both", expand=True, padx=12, pady=(0, 4))
+
+        actions = ctk.CTkFrame(card, fg_color="transparent")
+        actions.pack(fill="x", padx=12, pady=10)
+        _ghost_btn(actions, "Clear all", self._clear_all, width=84).pack(
+            side="left", padx=3)
+        _accent_btn(actions, "OPTIMIZE ROUTE", self._optimize, width=180,
+                    height=38, font=ctk.CTkFont(size=14, weight="bold")).pack(
+            side="right", padx=3)
+
+    def _refresh_ledger(self) -> None:
+        for w in self.ledger_box.winfo_children():
+            w.destroy()
+        total = sum(c.reward for c in self.contracts)
+        self.ledger_count.configure(
+            text=f"{len(self.contracts)} contract(s)"
+                 + (f"  ·  {total:,} aUEC" if total else ""))
+        if not self.contracts:
+            _label(self.ledger_box,
+                   "Add a contract to start building your run.").pack(
+                anchor="w", padx=6, pady=6)
+            return
+        for ci, c in enumerate(self.contracts):
+            block = ctk.CTkFrame(self.ledger_box, fg_color=FIELD_BG,
+                                 corner_radius=10)
+            block.pack(fill="x", pady=3)
+            hdr = ctk.CTkFrame(block, fg_color="transparent")
+            hdr.pack(fill="x")
+            ctk.CTkButton(hdr, text="✕", width=26, height=26,
+                          fg_color="transparent", hover_color=DANGER,
+                          text_color=MUTED,
+                          command=lambda i=ci: self._remove_contract(i)).pack(
+                side="right", padx=4, pady=2)
+            rew = f"   ·   {c.reward:,} aUEC" if c.reward else ""
+            total_scu = sum(it.scu for it in c.cargo)
+            ctk.CTkLabel(
+                hdr, text=f"📄  Contract {c.letter}    ↑ "
+                          f"{self._name(c.pickup)}   ·   {total_scu} SCU{rew}",
+                text_color=TEXT, font=ctk.CTkFont(size=13, weight="bold"),
+                anchor="w").pack(side="left", padx=10, pady=4)
+            for item in c.cargo:
+                ctk.CTkLabel(
+                    block, text=f"      {item.commodity} × {item.scu} SCU  →  "
+                                f"{self._name(item.dropoff)}",
+                    text_color=MUTED, font=ctk.CTkFont(size=12),
+                    anchor="w").pack(fill="x", padx=10, pady=(0, 1))
+            ctk.CTkFrame(block, height=4, fg_color="transparent").pack()
+
+    def _remove_contract(self, idx: int) -> None:
+        if 0 <= idx < len(self.contracts):
+            del self.contracts[idx]
+            self._refresh_ledger()
+
+    def _clear_all(self) -> None:
+        self.contracts = []
+        self._refresh_ledger()
+
+    # -- contract lettering ------------------------------------------------
+
+    def _refresh_contract_label(self) -> None:
+        self.contract_label.configure(
+            text=f"NEW CONTRACT — {_index_to_letters(self._letter_counter)}")
+
+    def _clear_labels(self) -> None:
+        for i, c in enumerate(self.contracts):
+            c.letter = _index_to_letters(i)
+        self._letter_counter = len(self.contracts)
+        self._refresh_ledger()
+        self._refresh_contract_label()
+
+    # -- route rendering ---------------------------------------------------
+
+    def _build_route_pane(self, card) -> None:
+        head = ctk.CTkFrame(card, fg_color="transparent")
+        head.pack(fill="x", padx=16, pady=(12, 4))
+        _section(head, "OPTIMIZED ROUTE").pack(side="left")
+        self.copy_btn = _ghost_btn(head, "Copy", self._copy_route, width=70)
+        self.copy_btn.pack(side="right")
+
+        # Stats chips + notes live above the scroll region (fixed, cheap).
+        self.stats_wrap = ctk.CTkFrame(card, fg_color="transparent")
+        self.stats_wrap.pack(fill="x", padx=12, pady=(0, 2))
+
+        # The stop list is a native tk.Text — it scrolls at OS speed no matter
+        # how long the route is, unlike a CTkScrollableFrame full of widgets.
+        self.route_body = ctk.CTkFrame(card, fg_color="transparent")
+        body = self.route_body
+        body.pack(fill="both", expand=True, padx=12, pady=(2, 12))
+        self.route_text = tk.Text(
+            body, bg=CARD_BG, fg=TEXT, bd=0, highlightthickness=0, wrap="word",
+            padx=10, pady=6, font=("Segoe UI", 11), cursor="arrow",
+            spacing1=0, spacing3=0)
+        sb = ctk.CTkScrollbar(body, command=self.route_text.yview)
+        sb.pack(side="right", fill="y")
+        self.route_text.configure(yscrollcommand=sb.set)
+        self.route_text.pack(side="left", fill="both", expand=True)
+        self._configure_route_tags()
+        self.route_text.configure(state="disabled")
+        # Re-render on resize so the right-aligned bars track the pane width.
+        self._rt_ctx = None
+        self._rt_after = None
+        self.route_text.bind("<Configure>", self._on_route_configure)
+        # click a load/drop line (or its checkbox) to tick it off
+        self.route_text.bind("<Button-1>", self._on_route_click)
+
+    def _route_tab_x(self) -> int:
+        # reserve room for the bar (150) + SCU label + margin, so the group
+        # lands flush against the right edge
+        w = self.route_text.winfo_width()
+        if w <= 1:            # not realised yet -> sensible default
+            w = 600
+        return max(120, w - 262)
+
+    def _on_route_configure(self, _event=None) -> None:
+        if not self._rt_ctx:
+            return
+        if self._rt_after is not None:
+            self.after_cancel(self._rt_after)
+        self._rt_after = self.after(120, self._rerender_route)
+
+    def _rerender_route(self) -> None:
+        self._rt_after = None
+        if self._rt_ctx:
+            self._render_route(*self._rt_ctx)
+
+    def _configure_route_tags(self) -> None:
+        t = self.route_text
+        t.tag_configure("num", foreground=ACCENT, font=("Segoe UI", 13, "bold"),
+                        lmargin1=6, spacing1=14)
+        # Tab stop parks the capacity bar in a fixed column to the right of the
+        # stop title, so the bars line up regardless of title length.
+        # NB: the tab stop that parks the bar is set on the *widget* (tag-level
+        # -tabs is ignored by Tk); see _render_route / _route_tab_x.
+        t.tag_configure("name", foreground=TEXT, font=("Segoe UI", 13, "bold"),
+                        spacing1=14)
+        t.tag_configure("drop_lab", foreground=DROP_BLUE,
+                        font=("Segoe UI", 10, "bold"), lmargin1=38)
+        t.tag_configure("drop_item", foreground=DROP_BLUE, font=("Segoe UI", 11),
+                        lmargin1=82, lmargin2=82, spacing3=1)
+        t.tag_configure("load_lab", foreground=LOAD_GREEN,
+                        font=("Segoe UI", 10, "bold"), lmargin1=38)
+        t.tag_configure("load_item", foreground=LOAD_GREEN, font=("Segoe UI", 11),
+                        lmargin1=82, lmargin2=82, spacing3=1)
+        t.tag_configure("leg_head", foreground=MUTED,
+                        font=("Segoe UI", 10, "bold"), lmargin1=56, spacing1=3)
+        # ticked-off orders: greyed + struck through (non-overlay only)
+        t.tag_configure("done", foreground=MUTED, overstrike=True)
+        t.tag_configure("barlabel", foreground=MUTED, font=("Segoe UI", 10))
+        t.tag_configure("trip", foreground=ACCENT, font=("Segoe UI", 12, "bold"),
+                        lmargin1=6, spacing1=16, spacing3=2)
+        t.tag_configure("warn", foreground=DANGER, font=("Segoe UI", 13, "bold"),
+                        lmargin1=8, spacing1=8)
+        t.tag_configure("placeholder", foreground=MUTED, font=("Segoe UI", 12),
+                        lmargin1=10, lmargin2=10, spacing1=10)
+
+    def _route_begin(self) -> None:
+        self.route_text.configure(state="normal")
+        self.route_text.delete("1.0", "end")
+        for w in self.route_text.winfo_children():  # drop old embedded bars
+            w.destroy()
+
+    def _route_end(self) -> None:
+        self.route_text.configure(state="disabled")
+        self.route_text.yview_moveto(0.0)
+
+    def _render_route_placeholder(self) -> None:
+        self._rt_ctx = None
+        for w in self.stats_wrap.winfo_children():
+            w.destroy()
+        self._route_begin()
+        self.route_text.insert(
+            "end",
+            "Build your ledger, then hit OPTIMIZE ROUTE.\n\n"
+            "The plan minimises stops first, then travel distance, then keeps "
+            "the most spare cargo room.", ("placeholder",))
+        self._route_end()
+
+    def _stat(self, parent, value, label):
+        cell = ctk.CTkFrame(parent, fg_color=FIELD_BG, corner_radius=10)
+        ctk.CTkLabel(cell, text=value, text_color=TEXT,
+                     font=ctk.CTkFont(size=17, weight="bold")).pack(
+            padx=14, pady=(8, 0))
+        ctk.CTkLabel(cell, text=label, text_color=MUTED,
+                     font=ctk.CTkFont(size=11)).pack(padx=14, pady=(0, 8))
+        return cell
+
+    def _stat_banner(self, text, color) -> None:
+        b = ctk.CTkLabel(self.stats_wrap, text=text, text_color=color, anchor="w",
+                         fg_color=CHIP_BG, corner_radius=8, justify="left",
+                         font=ctk.CTkFont(size=12), wraplength=560)
+        cols, rows = self.stats_wrap.grid_size()
+        b.grid(row=rows, column=0, columnspan=max(1, cols), sticky="ew",
+               padx=3, pady=(2, 4))
+
+    @staticmethod
+    def _badge(n: int) -> str:
+        circled = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
+        return circled[n - 1] if 1 <= n <= 20 else f"{n}."
+
+    def _assign(self, legs):
+        """Group a stop's legs by contract; assign ONE stable render-order id
+        per contract group (the tick-off unit). Always advances the counter so
+        ids stay stable across renders."""
+        groups: dict[str, list] = {}
+        order: list[str] = []
+        for leg in legs:
+            key = leg.contract or "—"
+            if key not in groups:
+                groups[key] = []
+                order.append(key)
+            groups[key].extend(leg.cargo)
+        out = []
+        for key in order:
+            gid = self._seq
+            self._seq += 1
+            out.append((gid, key, groups[key]))
+        return out
+
+    def _visible(self, oid: int) -> bool:
+        # checked orders are hidden entirely in overlay, shown (greyed) otherwise
+        return not (self._overlay and oid in self._checked)
+
+    def _render_legs(self, label, groups, lab_tag, item_tag) -> None:
+        t = self.route_text
+        if not any(self._visible(gid) for gid, _, _ in groups):
+            return
+        t.insert("end", f"{label}\n", (lab_tag,))
+        for gid, key, items in groups:
+            if not self._visible(gid):
+                continue
+            checked = gid in self._checked
+            box = "☑  " if checked else "☐  "
+            tag = f"ord{gid}"
+            done = ("done",) if checked else ()
+            t.insert("end", box, ("leg_head", tag))
+            t.insert("end", f"Contract {key}\n", ("leg_head", tag) + done)
+            for item in items:
+                t.insert("end", f"{item.commodity} - {item.scu} SCU\n",
+                         (item_tag, tag) + done)
+
+    def _ins_stop(self, n: int, stop, capacity: int) -> None:
+        drop_groups = self._assign(stop.dropoffs)
+        load_groups = self._assign(stop.pickups)
+        if self._overlay and not any(
+                self._visible(gid)
+                for gid, _, _ in (*drop_groups, *load_groups)):
+            return  # whole stop ticked off -> hide it in overlay
+
+        t = self.route_text
+        t.insert("end", f"{self._badge(n)}  ", ("num",))
+        t.insert("end", self._name(stop.location), ("name",))
+        if self._overlay:
+            # Overlay = bare minimum: just the stop name, no capacity bar.
+            t.insert("end", "\n", ("name",))
+        else:
+            # Rounded capacity bar + label, right-aligned via the tab stop.
+            frac = (stop.onboard_after / capacity) if capacity else 0
+            bar = ctk.CTkProgressBar(self.route_text, width=150, height=11,
+                                     corner_radius=5, progress_color=ACCENT,
+                                     fg_color=TRACK_BG)
+            bar.set(max(0.0, min(1.0, frac)))
+            t.insert("end", "\t", ("name",))
+            t.window_create("end", window=bar, pady=2)
+            t.insert("end", f"  {stop.onboard_after} / {capacity} SCU\n",
+                     ("name", "barlabel"))
+        self._render_legs("DROP", drop_groups, "drop_lab", "drop_item")
+        self._render_legs("LOAD", load_groups, "load_lab", "load_item")
+
+    def _on_route_click(self, event):
+        idx = self.route_text.index(f"@{event.x},{event.y}")
+        for tag in self.route_text.tag_names(idx):
+            if tag.startswith("ord"):
+                self._toggle_check(int(tag[3:]))
+                return "break"
+
+    def _toggle_check(self, oid: int) -> None:
+        self._checked.symmetric_difference_update({oid})
+        if self._rt_ctx:
+            self._render_route(*self._rt_ctx)
+
+    def _render_route(self, plan, capacity, reward) -> None:
+        for w in self.stats_wrap.winfo_children():
+            w.destroy()
+        self._route_begin()
+
+        if not plan.feasible:
+            self._rt_ctx = None
+            self.route_text.insert("end", "⚠  Plan not feasible\n", ("warn",))
+            for note in plan.notes:
+                self.route_text.insert("end", note + "\n", ("placeholder",))
+            self._route_end()
+            return
+
+        # right-align the capacity bars to the current pane width, and remember
+        # context so a resize can re-lay them out (widget-level -tabs, not tag)
+        self.route_text.configure(tabs=(self._route_tab_x(),))
+        self._rt_ctx = (plan, capacity, reward)
+
+        # stat chips (hidden in overlay mode)
+        if not self._overlay:
+            cells = [
+                (f"{plan.total_stops}", "stops"),
+            ]
+            if reward:
+                cells.append((f"{reward:,}", "aUEC"))
+            for i, (val, lab) in enumerate(cells):
+                self._stat(self.stats_wrap, val, lab).grid(
+                    row=0, column=i, padx=3, pady=(2, 4), sticky="ew")
+                self.stats_wrap.grid_columnconfigure(i, weight=1)
+            for note in plan.notes:
+                self._stat_banner("ℹ  " + note, ACCENT)
+
+        # stop list (fast native text)
+        self._seq = 0                   # per-render order-id counter
+        multi = len(plan.trips) > 1
+        for ti, trip in enumerate(plan.trips, 1):
+            if multi:
+                util = (trip.peak_scu / capacity * 100) if capacity else 0
+                self.route_text.insert(
+                    "end",
+                    f"TRIP {ti}  ·  peak {trip.peak_scu}/{capacity} SCU "
+                    f"({util:.0f}%)\n", ("trip",))
+            for j, stop in enumerate(trip.stops, 1):
+                self._ins_stop(j, stop, capacity)
+        self._route_end()
+
+    def _copy_route(self) -> None:
+        if not self._last_plan_text:
+            return
+        self.clipboard_clear()
+        self.clipboard_append(self._last_plan_text)
+        self.copy_btn.configure(text="Copied ✓")
+        self.after(1500, lambda: self.copy_btn.configure(text="Copy"))
+
+    # -- optimize / persistence -------------------------------------------
+
+    def _capacity(self):
+        try:
+            cap = int(self.cap_var.get().replace(",", "").strip())
+        except ValueError:
+            self._render_route_error("Capacity must be a number in SCU.")
+            return None
+        if cap <= 0:
+            self._render_route_error("Capacity must be positive.")
+            return None
+        return cap
+
+    def _render_route_error(self, msg: str) -> None:
+        self._rt_ctx = None
+        for w in self.stats_wrap.winfo_children():
+            w.destroy()
+        self._route_begin()
+        self.route_text.insert("end", "⚠  " + msg + "\n", ("warn",))
+        self._route_end()
+
+    def _all_legs(self) -> list[Leg]:
+        """Flatten the ledger into optimizer tasks, grouping each contract's
+        cargo by dropoff (one pickup -> dropoff move per group)."""
+
+        legs: list[Leg] = []
+        for c in self.contracts:
+            groups: dict[str, list[CargoItem]] = {}
+            for item in c.cargo:
+                groups.setdefault(item.dropoff, []).append(item)
+            for dropoff, items in groups.items():
+                legs.append(Leg(c.pickup, dropoff, list(items), c.letter))
+        return legs
+
+    def _optimize(self) -> None:
+        cap = self._capacity()
+        if cap is None:
+            return
+        legs = self._all_legs()
+        if not legs:
+            self._render_route_error("Add at least one contract first.")
+            return
+        start = self.start_picker.get_id()
+        plan = optimize(legs, Ship("Cargo", cap), self.cost, start=start)
+        reward = sum(c.reward for c in self.contracts)
+        self._checked = set()           # fresh plan -> nothing ticked off yet
+        self._last_plan = plan
+        self._last_plan_text = format_plan(plan, self.locations, cap,
+                                           total_reward=reward)
+        self._render_route(plan, cap, reward)
+
+
+def run() -> None:
+    # Give Windows an explicit app id so the taskbar uses our icon (and doesn't
+    # group us under "python"). Must happen before the window is created.
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "StarCitizenCargoStack.App")
+    except Exception:
+        pass
+    # CTk re-runs widget-scaling callbacks on every window Configure event
+    # (i.e. constantly while dragging/resizing, worst across monitors with
+    # different DPI). We render at a fixed scale, so suppress that work for a
+    # smooth move/resize. Purely disables the rescale callbacks.
+    try:
+        ctk.deactivate_automatic_dpi_awareness()
+    except Exception:
+        pass
+    CargoApp().mainloop()

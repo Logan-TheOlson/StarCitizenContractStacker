@@ -1,0 +1,1098 @@
+{
+  "_comment": "Seed universe data. Refresh/expand via app/scraper. type: system|planet|moon|city|station|lagrange|outpost|distribution. distances are optional explicit minutes; absent pairs fall back to the tier model in cost.py.",
+  "distances": {},
+  "locations": [
+    {
+      "id": "STANTON",
+      "name": "Stanton",
+      "type": "system",
+      "system": "STANTON",
+      "parent": null
+    },
+    {
+      "id": "HURSTON",
+      "name": "Hurston",
+      "type": "planet",
+      "system": "STANTON",
+      "parent": "STANTON"
+    },
+    {
+      "id": "LORVILLE",
+      "name": "Lorville",
+      "type": "city",
+      "system": "STANTON",
+      "parent": "HURSTON"
+    },
+    {
+      "id": "EVERUS_HARBOR",
+      "name": "Everus Harbor",
+      "type": "station",
+      "system": "STANTON",
+      "parent": "HURSTON"
+    },
+    {
+      "id": "ARIAL",
+      "name": "Arial",
+      "type": "moon",
+      "system": "STANTON",
+      "parent": "HURSTON"
+    },
+    {
+      "id": "HDMS_BEZDEK",
+      "name": "HDMS-Bezdek",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "ARIAL"
+    },
+    {
+      "id": "HDMS_LATHAN",
+      "name": "HDMS-Lathan",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "ARIAL"
+    },
+    {
+      "id": "ABERDEEN",
+      "name": "Aberdeen",
+      "type": "moon",
+      "system": "STANTON",
+      "parent": "HURSTON"
+    },
+    {
+      "id": "HDMS_NORGAARD",
+      "name": "HDMS-Norgaard",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "ABERDEEN"
+    },
+    {
+      "id": "HDMS_ANDERSON",
+      "name": "HDMS-Anderson",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "ABERDEEN"
+    },
+    {
+      "id": "MAGDA",
+      "name": "Magda",
+      "type": "moon",
+      "system": "STANTON",
+      "parent": "HURSTON"
+    },
+    {
+      "id": "HDMS_HADLEY",
+      "name": "HDMS-Hadley",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "MAGDA"
+    },
+    {
+      "id": "HDMS_OPAREI",
+      "name": "HDMS-Oparei",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "MAGDA"
+    },
+    {
+      "id": "ITA",
+      "name": "Ita",
+      "type": "moon",
+      "system": "STANTON",
+      "parent": "HURSTON"
+    },
+    {
+      "id": "HDMS_RYDER",
+      "name": "HDMS-Ryder",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "ITA"
+    },
+    {
+      "id": "HDMS_WOODRUFF",
+      "name": "HDMS-Woodruff",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "ITA"
+    },
+    {
+      "id": "CRUSADER",
+      "name": "Crusader",
+      "type": "planet",
+      "system": "STANTON",
+      "parent": "STANTON"
+    },
+    {
+      "id": "ORISON",
+      "name": "Orison",
+      "type": "city",
+      "system": "STANTON",
+      "parent": "CRUSADER"
+    },
+    {
+      "id": "SERAPHIM_STATION",
+      "name": "Seraphim Station",
+      "type": "station",
+      "system": "STANTON",
+      "parent": "CRUSADER"
+    },
+    {
+      "id": "CELLIN",
+      "name": "Cellin",
+      "type": "moon",
+      "system": "STANTON",
+      "parent": "CRUSADER"
+    },
+    {
+      "id": "TERRA_MILLS",
+      "name": "Terra Mills Hydrofarm",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "CELLIN"
+    },
+    {
+      "id": "HICKES_RESEARCH",
+      "name": "Hickes Research Outpost",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "CELLIN"
+    },
+    {
+      "id": "DAYMAR",
+      "name": "Daymar",
+      "type": "moon",
+      "system": "STANTON",
+      "parent": "CRUSADER"
+    },
+    {
+      "id": "SHUBIN_SCD1",
+      "name": "Shubin Mining SCD-1",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "DAYMAR"
+    },
+    {
+      "id": "KUDRE_ORE",
+      "name": "Kudre Ore",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "DAYMAR"
+    },
+    {
+      "id": "BOUNTIFUL_HARVEST",
+      "name": "Bountiful Harvest Hydroponics",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "DAYMAR"
+    },
+    {
+      "id": "ARCCORP_141",
+      "name": "ArcCorp Mining 141",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "DAYMAR"
+    },
+    {
+      "id": "YELA",
+      "name": "Yela",
+      "type": "moon",
+      "system": "STANTON",
+      "parent": "CRUSADER"
+    },
+    {
+      "id": "ARCCORP_157",
+      "name": "Benson Mining Outpost",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "YELA"
+    },
+    {
+      "id": "DEAKINS_RESEARCH",
+      "name": "Deakins Research Outpost",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "YELA"
+    },
+    {
+      "id": "ARCCORP",
+      "name": "ArcCorp",
+      "type": "planet",
+      "system": "STANTON",
+      "parent": "STANTON"
+    },
+    {
+      "id": "AREA18",
+      "name": "Area18",
+      "type": "city",
+      "system": "STANTON",
+      "parent": "ARCCORP"
+    },
+    {
+      "id": "BAIJINI_POINT",
+      "name": "Baijini Point",
+      "type": "station",
+      "system": "STANTON",
+      "parent": "ARCCORP"
+    },
+    {
+      "id": "LYRIA",
+      "name": "Lyria",
+      "type": "moon",
+      "system": "STANTON",
+      "parent": "ARCCORP"
+    },
+    {
+      "id": "HUMBOLDT_MINES",
+      "name": "Humboldt Mines",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "LYRIA"
+    },
+    {
+      "id": "LOVERIDGE",
+      "name": "Loveridge Mineral Reserve",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "LYRIA"
+    },
+    {
+      "id": "SHUBIN_SAL5",
+      "name": "Shubin Mining SAL-5",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "LYRIA"
+    },
+    {
+      "id": "WALA",
+      "name": "Wala",
+      "type": "moon",
+      "system": "STANTON",
+      "parent": "ARCCORP"
+    },
+    {
+      "id": "ARCCORP_045",
+      "name": "ArcCorp Mining 045",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "WALA"
+    },
+    {
+      "id": "SAMSON_SON",
+      "name": "Samson & Son's Salvage",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "WALA"
+    },
+    {
+      "id": "SHADY_GLEN",
+      "name": "Shady Glen Farms",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "WALA"
+    },
+    {
+      "id": "MICROTECH",
+      "name": "microTech",
+      "type": "planet",
+      "system": "STANTON",
+      "parent": "STANTON"
+    },
+    {
+      "id": "NEW_BABBAGE",
+      "name": "New Babbage",
+      "type": "city",
+      "system": "STANTON",
+      "parent": "MICROTECH"
+    },
+    {
+      "id": "PORT_TRESSLER",
+      "name": "Port Tressler",
+      "type": "station",
+      "system": "STANTON",
+      "parent": "MICROTECH"
+    },
+    {
+      "id": "CALLIOPE",
+      "name": "Calliope",
+      "type": "moon",
+      "system": "STANTON",
+      "parent": "MICROTECH"
+    },
+    {
+      "id": "RAYARI_DELTANA",
+      "name": "Rayari Deltana Research",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "CALLIOPE"
+    },
+    {
+      "id": "SHUBIN_SMCA6",
+      "name": "Shubin Mining SMCa-6",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "CALLIOPE"
+    },
+    {
+      "id": "CLIO",
+      "name": "Clio",
+      "type": "moon",
+      "system": "STANTON",
+      "parent": "MICROTECH"
+    },
+    {
+      "id": "RAYARI_CANTWELL",
+      "name": "Rayari Cantwell Research",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "CLIO"
+    },
+    {
+      "id": "EUTERPE",
+      "name": "Euterpe",
+      "type": "moon",
+      "system": "STANTON",
+      "parent": "MICROTECH"
+    },
+    {
+      "id": "DEVLIN_SCRAP",
+      "name": "Devlin Scrap & Salvage",
+      "type": "outpost",
+      "system": "STANTON",
+      "parent": "EUTERPE"
+    },
+    {
+      "id": "HUR_L1",
+      "name": "HUR-L1 Green Glade Station",
+      "type": "lagrange",
+      "system": "STANTON",
+      "parent": "HURSTON"
+    },
+    {
+      "id": "HUR_L2",
+      "name": "HUR-L2 Faithful Dream Station",
+      "type": "lagrange",
+      "system": "STANTON",
+      "parent": "HURSTON"
+    },
+    {
+      "id": "HUR_L3",
+      "name": "HUR-L3 Thundering Express Station",
+      "type": "lagrange",
+      "system": "STANTON",
+      "parent": "HURSTON"
+    },
+    {
+      "id": "HUR_L4",
+      "name": "HUR-L4 Melodic Fields Station",
+      "type": "lagrange",
+      "system": "STANTON",
+      "parent": "HURSTON"
+    },
+    {
+      "id": "HUR_L5",
+      "name": "HUR-L5 High Course Station",
+      "type": "lagrange",
+      "system": "STANTON",
+      "parent": "HURSTON"
+    },
+    {
+      "id": "CRU_L1",
+      "name": "CRU-L1 Ambitious Dream Station",
+      "type": "lagrange",
+      "system": "STANTON",
+      "parent": "CRUSADER"
+    },
+    {
+      "id": "CRU_L4",
+      "name": "CRU-L4 Shallow Fields Station",
+      "type": "lagrange",
+      "system": "STANTON",
+      "parent": "CRUSADER"
+    },
+    {
+      "id": "CRU_L5",
+      "name": "CRU-L5 Beautiful Glen Station",
+      "type": "lagrange",
+      "system": "STANTON",
+      "parent": "CRUSADER"
+    },
+    {
+      "id": "ARC_L1",
+      "name": "ARC-L1 Wide Forest Station",
+      "type": "lagrange",
+      "system": "STANTON",
+      "parent": "ARCCORP"
+    },
+    {
+      "id": "ARC_L2",
+      "name": "ARC-L2 Lively Pathway Station",
+      "type": "lagrange",
+      "system": "STANTON",
+      "parent": "ARCCORP"
+    },
+    {
+      "id": "ARC_L3",
+      "name": "ARC-L3 Modern Express Station",
+      "type": "lagrange",
+      "system": "STANTON",
+      "parent": "ARCCORP"
+    },
+    {
+      "id": "ARC_L4",
+      "name": "ARC-L4 Faint Glen Station",
+      "type": "lagrange",
+      "system": "STANTON",
+      "parent": "ARCCORP"
+    },
+    {
+      "id": "ARC_L5",
+      "name": "ARC-L5 Yellow Core Station",
+      "type": "lagrange",
+      "system": "STANTON",
+      "parent": "ARCCORP"
+    },
+    {
+      "id": "MIC_L1",
+      "name": "MIC-L1 Shallow Frontier Station",
+      "type": "lagrange",
+      "system": "STANTON",
+      "parent": "MICROTECH"
+    },
+    {
+      "id": "MIC_L2",
+      "name": "MIC-L2 Long Forest Station",
+      "type": "lagrange",
+      "system": "STANTON",
+      "parent": "MICROTECH"
+    },
+    {
+      "id": "MIC_L3",
+      "name": "MIC-L3 Endless Odyssey Station",
+      "type": "lagrange",
+      "system": "STANTON",
+      "parent": "MICROTECH"
+    },
+    {
+      "id": "MIC_L4",
+      "name": "MIC-L4 Red Crossroads Station",
+      "type": "lagrange",
+      "system": "STANTON",
+      "parent": "MICROTECH"
+    },
+    {
+      "id": "MIC_L5",
+      "name": "MIC-L5 Modern Icarus Station",
+      "type": "lagrange",
+      "system": "STANTON",
+      "parent": "MICROTECH"
+    },
+    {
+      "id": "PYRO",
+      "name": "Pyro",
+      "type": "system",
+      "system": "PYRO",
+      "parent": null
+    },
+    {
+      "id": "PYRO_I",
+      "name": "Pyro I",
+      "type": "planet",
+      "system": "PYRO",
+      "parent": "PYRO"
+    },
+    {
+      "id": "MONOX",
+      "name": "Monox",
+      "type": "planet",
+      "system": "PYRO",
+      "parent": "PYRO"
+    },
+    {
+      "id": "BLOOM",
+      "name": "Bloom",
+      "type": "planet",
+      "system": "PYRO",
+      "parent": "PYRO"
+    },
+    {
+      "id": "PYRO_IV",
+      "name": "Pyro IV",
+      "type": "planet",
+      "system": "PYRO",
+      "parent": "PYRO"
+    },
+    {
+      "id": "PYRO_V",
+      "name": "Pyro V",
+      "type": "planet",
+      "system": "PYRO",
+      "parent": "PYRO"
+    },
+    {
+      "id": "TERMINUS",
+      "name": "Terminus",
+      "type": "planet",
+      "system": "PYRO",
+      "parent": "PYRO"
+    },
+    {
+      "id": "ADIR",
+      "name": "Adir",
+      "type": "moon",
+      "system": "PYRO",
+      "parent": "PYRO_V"
+    },
+    {
+      "id": "FAIRO",
+      "name": "Fairo",
+      "type": "moon",
+      "system": "PYRO",
+      "parent": "PYRO_V"
+    },
+    {
+      "id": "FUEGO",
+      "name": "Fuego",
+      "type": "moon",
+      "system": "PYRO",
+      "parent": "PYRO_V"
+    },
+    {
+      "id": "IGNIS",
+      "name": "Ignis",
+      "type": "moon",
+      "system": "PYRO",
+      "parent": "PYRO_V"
+    },
+    {
+      "id": "VATRA",
+      "name": "Vatra",
+      "type": "moon",
+      "system": "PYRO",
+      "parent": "PYRO_V"
+    },
+    {
+      "id": "VUUR",
+      "name": "Vuur",
+      "type": "moon",
+      "system": "PYRO",
+      "parent": "PYRO_V"
+    },
+    {
+      "id": "PYAM_FARSTAT_1_2",
+      "name": "PYAM-FARSTAT-1-2",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "PYRO_I"
+    },
+    {
+      "id": "PYAM_FARSTAT_1_3",
+      "name": "PYAM-FARSTAT-1-3",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "PYRO_I"
+    },
+    {
+      "id": "PYAM_FARSTAT_1_5",
+      "name": "PYAM-FARSTAT-1-5",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "PYRO_I"
+    },
+    {
+      "id": "CHECKMATE_STATION",
+      "name": "Checkmate Station",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "MONOX"
+    },
+    {
+      "id": "ORBITUARY",
+      "name": "Orbituary",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "BLOOM"
+    },
+    {
+      "id": "STARLIGHT_SERVICE_STATION",
+      "name": "Starlight Service Station",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "BLOOM"
+    },
+    {
+      "id": "PATCH_CITY",
+      "name": "Patch City",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "BLOOM"
+    },
+    {
+      "id": "PYAM_FARSTAT_3_5",
+      "name": "PYAM-FARSTAT-3-5",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "BLOOM"
+    },
+    {
+      "id": "PYAM_FARSTAT_5_1",
+      "name": "PYAM-FARSTAT-5-1",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "PYRO_V"
+    },
+    {
+      "id": "PYAM_FARSTAT_5_3",
+      "name": "PYAM-FARSTAT-5-3",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "PYRO_V"
+    },
+    {
+      "id": "ROD_S_FUEL_N_SUPPLIES",
+      "name": "Rod's Fuel 'N Supplies",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "PYRO_V"
+    },
+    {
+      "id": "RAT_S_NEST",
+      "name": "Rat's Nest",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "PYRO_V"
+    },
+    {
+      "id": "PYAM_FARSTAT_6_2",
+      "name": "PYAM-FARSTAT-6-2",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "PYRO_IV"
+    },
+    {
+      "id": "ENDGAME",
+      "name": "Endgame",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "PYRO_IV"
+    },
+    {
+      "id": "DUDLEY_DAUGHTERS",
+      "name": "Dudley & Daughters",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "TERMINUS"
+    },
+    {
+      "id": "MEGUMI_REFUELING",
+      "name": "Megumi Refueling",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "TERMINUS"
+    },
+    {
+      "id": "RUIN_STATION",
+      "name": "Ruin Station",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "TERMINUS"
+    },
+    {
+      "id": "GASLIGHT",
+      "name": "Gaslight",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "PYRO_V"
+    },
+    {
+      "id": "PYAM_FARSTAT_2_3",
+      "name": "PYAM-FARSTAT-2-3",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "MONOX"
+    },
+    {
+      "id": "PYAM_SUPVISR_3_4",
+      "name": "PYAM-SUPVISR-3-4",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "BLOOM"
+    },
+    {
+      "id": "PYAM_SUPVISR_3_5",
+      "name": "PYAM-SUPVISR-3-5",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "BLOOM"
+    },
+    {
+      "id": "STANTON_GATEWAY_PYRO",
+      "name": "Stanton Gateway (Pyro)",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "PYRO"
+    },
+    {
+      "id": "NYX_GATEWAY_PYRO",
+      "name": "Nyx Gateway (Pyro)",
+      "type": "station",
+      "system": "PYRO",
+      "parent": "PYRO"
+    },
+    {
+      "id": "RUSTVILLE",
+      "name": "Rustville",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "PYRO_I"
+    },
+    {
+      "id": "JACKSON_S_SWAP",
+      "name": "Jackson's Swap",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "MONOX"
+    },
+    {
+      "id": "LAST_DITCH",
+      "name": "Last Ditch",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "MONOX"
+    },
+    {
+      "id": "SUNSET_MESA",
+      "name": "Sunset Mesa",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "MONOX"
+    },
+    {
+      "id": "YANG_S_PLACE",
+      "name": "Yang's Place",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "MONOX"
+    },
+    {
+      "id": "BUENO_RAVINE",
+      "name": "Bueno Ravine",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "BLOOM"
+    },
+    {
+      "id": "SHADOWFALL",
+      "name": "Shadowfall",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "BLOOM"
+    },
+    {
+      "id": "SHEPHERD_S_REST",
+      "name": "Shepherd's Rest",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "BLOOM"
+    },
+    {
+      "id": "THE_GOLDEN_RIVIERA",
+      "name": "The Golden Riviera",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "BLOOM"
+    },
+    {
+      "id": "THE_YARD",
+      "name": "The Yard",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "BLOOM"
+    },
+    {
+      "id": "STAG_S_RUT",
+      "name": "Stag's Rut",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "PYRO_I"
+    },
+    {
+      "id": "ARID_REACH",
+      "name": "Arid Reach",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "MONOX"
+    },
+    {
+      "id": "OSTLER_S_CLAIM",
+      "name": "Ostler's Claim",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "MONOX"
+    },
+    {
+      "id": "CARVER_S_RIDGE",
+      "name": "Carver's Ridge",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "BLOOM"
+    },
+    {
+      "id": "FRIGID_KNOT",
+      "name": "Frigid Knot",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "BLOOM"
+    },
+    {
+      "id": "NARENA_S_REST",
+      "name": "Narena's Rest",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "BLOOM"
+    },
+    {
+      "id": "WINDFALL",
+      "name": "Windfall",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "BLOOM"
+    },
+    {
+      "id": "ASHLAND",
+      "name": "Ashland",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "IGNIS"
+    },
+    {
+      "id": "CHAWLA_S_BEACH",
+      "name": "Chawla's Beach",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "PYRO_IV"
+    },
+    {
+      "id": "FALLOW_FIELD",
+      "name": "Fallow Field",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "PYRO_IV"
+    },
+    {
+      "id": "GONER_S_DEAL",
+      "name": "Goner's Deal",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "PYRO_IV"
+    },
+    {
+      "id": "SACREN_S_PLOT",
+      "name": "Sacren's Plot",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "PYRO_IV"
+    },
+    {
+      "id": "KABIR_S_POST",
+      "name": "Kabir's Post",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "IGNIS"
+    },
+    {
+      "id": "BLACKROCK_EXCHANGE",
+      "name": "Blackrock Exchange",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "TERMINUS"
+    },
+    {
+      "id": "BULLOCK_S_REACH",
+      "name": "Bullock's Reach",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "TERMINUS"
+    },
+    {
+      "id": "CANARD_VIEW",
+      "name": "Canard View",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "TERMINUS"
+    },
+    {
+      "id": "KINDER_PLOTS",
+      "name": "Kinder Plots",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "TERMINUS"
+    },
+    {
+      "id": "LAST_LANDINGS",
+      "name": "Last Landings",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "TERMINUS"
+    },
+    {
+      "id": "ROUGH_LANDING",
+      "name": "Rough Landing",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "TERMINUS"
+    },
+    {
+      "id": "SCARPER_S_TURN",
+      "name": "Scarper's Turn",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "TERMINUS"
+    },
+    {
+      "id": "STONETREE",
+      "name": "Stonetree",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "TERMINUS"
+    },
+    {
+      "id": "PROPHET_S_PEAK",
+      "name": "Prophet's Peak",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "ADIR"
+    },
+    {
+      "id": "SEER_S_CANYON",
+      "name": "Seer's Canyon",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "VATRA"
+    },
+    {
+      "id": "PROSPECT_DEPOT",
+      "name": "Prospect Depot",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "BLOOM"
+    },
+    {
+      "id": "DINGER_S_DEPOT",
+      "name": "Dinger's Depot",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "PYRO_IV"
+    },
+    {
+      "id": "SLOWBURN_DEPOT",
+      "name": "Slowburn Depot",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "MONOX"
+    },
+    {
+      "id": "FEO_CANYON_DEPOT",
+      "name": "Feo Canyon Depot",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "FAIRO"
+    },
+    {
+      "id": "GRAY_GARDENS_DEPOT",
+      "name": "Gray Gardens Depot",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "PYRO_I"
+    },
+    {
+      "id": "WATCHER_S_DEPOT",
+      "name": "Watcher's Depot",
+      "type": "outpost",
+      "system": "PYRO",
+      "parent": "TERMINUS"
+    },
+    {
+      "id": "NYX",
+      "name": "Nyx",
+      "type": "system",
+      "system": "NYX",
+      "parent": null
+    },
+    {
+      "id": "NYX_I",
+      "name": "Nyx I",
+      "type": "planet",
+      "system": "NYX",
+      "parent": "NYX"
+    },
+    {
+      "id": "NYX_II",
+      "name": "Nyx II",
+      "type": "planet",
+      "system": "NYX",
+      "parent": "NYX"
+    },
+    {
+      "id": "NYX_III",
+      "name": "Nyx III",
+      "type": "planet",
+      "system": "NYX",
+      "parent": "NYX"
+    },
+    {
+      "id": "DELAMAR",
+      "name": "Delamar",
+      "type": "planet",
+      "system": "NYX",
+      "parent": "NYX"
+    },
+    {
+      "id": "STANTON_GATEWAY_NYX",
+      "name": "Stanton Gateway (Nyx)",
+      "type": "station",
+      "system": "NYX",
+      "parent": "NYX"
+    },
+    {
+      "id": "PYRO_GATEWAY_NYX",
+      "name": "Pyro Gateway (Nyx)",
+      "type": "station",
+      "system": "NYX",
+      "parent": "NYX"
+    },
+    {
+      "id": "PEOPLE_S_SERVICE_STATION_DELTA",
+      "name": "People's Service Station Delta",
+      "type": "station",
+      "system": "NYX",
+      "parent": "NYX"
+    },
+    {
+      "id": "PEOPLE_S_SERVICE_STATION_ALPHA",
+      "name": "People's Service Station Alpha",
+      "type": "station",
+      "system": "NYX",
+      "parent": "NYX"
+    },
+    {
+      "id": "PEOPLE_S_SERVICE_STATION_THETA",
+      "name": "People's Service Station Theta",
+      "type": "station",
+      "system": "NYX",
+      "parent": "NYX"
+    },
+    {
+      "id": "PEOPLE_S_SERVICE_STATION_LAMBDA",
+      "name": "People's Service Station Lambda",
+      "type": "station",
+      "system": "NYX",
+      "parent": "NYX"
+    },
+    {
+      "id": "LEVSKI",
+      "name": "Levski",
+      "type": "city",
+      "system": "NYX",
+      "parent": "DELAMAR"
+    }
+  ]
+}
