@@ -79,8 +79,34 @@ def _asset(name: str) -> Path:
     return Path(__file__).resolve().parents[2] / "assets" / name
 
 
+# SCU container sizes a contract leg can be split into, largest first.
+BOX_SIZES = (8, 4, 2, 1)
+
+
+def breakdown_scu(total: int, sizes: tuple[int, ...] = BOX_SIZES) -> dict[int, int]:
+    """Split ``total`` SCU into the fewest containers from ``sizes``.
+
+    With 1, 2, 4, 8 SCU boxes a greedy largest-first split is optimal, e.g.
+    3 -> {2: 1, 1: 1}, 11 -> {8: 1, 2: 1, 1: 1}, 16 -> {8: 2}. This mirrors how
+    the game usually hands cargo out; the user can still override it.
+    """
+    boxes: dict[int, int] = {}
+    remaining = max(0, int(total))
+    for size in sorted(sizes, reverse=True):
+        n, remaining = divmod(remaining, size)
+        if n:
+            boxes[size] = n
+    return boxes
+
+
+def format_boxes(boxes: dict[int, int]) -> str:
+    """Render a box dict as ``'8x1, 2x1, 1x1'`` (largest size first)."""
+    return ", ".join(f"{s}x{n}" for s, n in sorted(boxes.items(), reverse=True))
+
+
 def parse_boxes(text: str) -> dict[int, int]:
-    """Parse '32x1, 16x2' -> {32: 1, 16: 2}. Empty -> {}."""
+    """Parse '8x1, 2x1' -> {8: 1, 2: 1}. Accepts multiple comma/semicolon-
+    separated sizes. Empty -> {}."""
 
     boxes: dict[int, int] = {}
     for chunk in text.replace(";", ",").split(","):
@@ -88,9 +114,15 @@ def parse_boxes(text: str) -> dict[int, int]:
         if not chunk:
             continue
         if "x" not in chunk:
-            raise ValueError(f"Box entry '{chunk}' must look like '32x1'.")
+            raise ValueError(f"Box entry '{chunk}' must look like '8x1'.")
         size_s, count_s = chunk.split("x", 1)
-        boxes[int(size_s)] = boxes.get(int(size_s), 0) + int(count_s)
+        try:
+            size, count = int(size_s), int(count_s)
+        except ValueError:
+            raise ValueError(f"Box entry '{chunk}' must look like '8x1'.")
+        if size <= 0 or count <= 0:
+            raise ValueError(f"Box entry '{chunk}' must use positive numbers.")
+        boxes[size] = boxes.get(size, 0) + count
     return boxes
 
 
@@ -243,9 +275,13 @@ class LocationPicker(ctk.CTkFrame):
         self.popup.wm_geometry(f"{w}x{rows * 22 + 6}+{x}+{y}")
 
     def _on_return(self, _event):
-        # Enter accepts the highlighted autofill match when the list is open.
+        # Enter accepts the highlighted autofill match when the list is open...
         if self.popup is not None and self.listbox is not None:
-            self._accept()
+            self._accept()            # _accept() fires _on_choose at the end
+            return "break"
+        # ...otherwise it just confirms and moves on (keyboard entry flow).
+        if self._on_choose:
+            self._on_choose()
             return "break"
 
     def _move(self, delta):
@@ -360,6 +396,11 @@ class CargoApp(ctk.CTk):
         self._last_plan = None
         self._last_plan_text = ""
         self._checked: set[int] = set()   # ticked-off order ids (route view)
+        self._stop_gids: dict[int, list[int]] = {}  # stop index -> its order ids
+        self._editing_index = None        # ledger row being edited, if any
+        self._editing_letter = None       # its letter (preserved across the edit)
+        self._ADD_LABEL = "✓  Add contract   (Ctrl+Enter)"
+        self._SAVE_LABEL = "✓  Save changes"
 
         # vars the tests + entry rows bind to
         self.cap_var = tk.StringVar(value="120")
@@ -367,12 +408,17 @@ class CargoApp(ctk.CTk):
         self.commodity_var = tk.StringVar()
         self.amount_var = tk.StringVar()
         self.boxes_var = tk.StringVar()
+        # Last box breakdown we auto-filled, so we know when the user has typed
+        # their own (and we should stop overwriting it).
+        self._boxes_auto = ""
         self.overlay_var = tk.BooleanVar(value=False)
         self._overlay = False
         self._afters: set[str] = set()    # pending after() ids, cancelled on close
 
         self._build()
         self.bind("<Control-Return>", lambda _e: self._add_contract())
+        # Auto-suggest the box breakdown as the SCU amount is typed.
+        self.amount_var.trace_add("write", self._on_amount_change)
 
     def _after(self, ms: int, cb) -> str:
         """``after`` that auto-deregisters and is cancelled on teardown, so a
@@ -543,8 +589,8 @@ class CargoApp(ctk.CTk):
             sort_key=self._dist_key(lambda: self.start_picker.get_id()))
         self.cpickup_picker.grid(row=1, column=0, padx=6, pady=(0, 8), sticky="w")
         _label(top, "Reward aUEC").grid(row=0, column=1, padx=6, sticky="w")
-        _entry(top, self.reward_var, 130).grid(row=1, column=1, padx=6,
-                                               pady=(0, 8), sticky="w")
+        reward = _entry(top, self.reward_var, 130)
+        reward.grid(row=1, column=1, padx=6, pady=(0, 8), sticky="w")
 
         ctk.CTkFrame(card, height=1, fg_color=FIELD_BG).pack(
             fill="x", padx=16, pady=(4, 8))
@@ -568,12 +614,34 @@ class CargoApp(ctk.CTk):
             row, self.loc_options, width=140, placeholder="dropoff…",
             sort_key=self._dist_key(lambda: self.cpickup_picker.get_id()))
         self.cdropoff_picker.grid(row=1, column=2, padx=4, pady=(0, 6), sticky="w")
-        boxes = _entry(row, self.boxes_var, 60, "32x1")
+        boxes = _entry(row, self.boxes_var, 110, "auto · e.g. 8x1, 2x1")
         boxes.grid(row=1, column=3, padx=4, pady=(0, 6), sticky="w")
         _accent_btn(row, "+ Add", self._add_cargo, width=70).grid(
             row=1, column=4, padx=4, pady=(0, 6), sticky="w")
-        for w in (amt, boxes):
-            w.bind("<Return>", lambda _e: self._add_cargo())
+
+        # --- keyboard-only entry flow ------------------------------------
+        # Fields in tab order. After Boxes, Tab loops back to Commodity so you
+        # can rattle off cargo lines without leaving the keyboard; Pickup and
+        # Reward are per-contract and reached only at the start (or Shift+Tab).
+        self._field_order = [
+            self.cpickup_picker.entry, reward, self.commodity_picker.entry,
+            amt, self.cdropoff_picker.entry, boxes,
+        ]
+        pickers = {0: self.cpickup_picker, 2: self.commodity_picker,
+                   4: self.cdropoff_picker}
+        for i, w in enumerate(self._field_order):
+            pk = pickers.get(i)
+            w.bind("<Tab>", lambda _e, i=i, pk=pk: self._field_nav(i, True, pk))
+            for seq in ("<Shift-Tab>", "<ISO_Left_Tab>"):
+                w.bind(seq, lambda _e, i=i, pk=pk: self._field_nav(i, False, pk))
+        # Enter advances like Tab; on the pickers this happens after the match
+        # is accepted (see LocationPicker._on_return / _on_choose).
+        self.cpickup_picker._on_choose = lambda: self._field_order[1].focus_set()
+        self.commodity_picker._on_choose = lambda: self._field_order[3].focus_set()
+        self.cdropoff_picker._on_choose = lambda: self._field_order[5].focus_set()
+        reward.bind("<Return>", lambda _e: self._field_nav(1, True))
+        amt.bind("<Return>", lambda _e: self._field_nav(3, True))
+        boxes.bind("<Return>", lambda _e: self._add_cargo() or "break")
 
         # draft cargo lines (one-click ✕ each)
         self.draft_box = ctk.CTkFrame(card, fg_color="transparent")
@@ -583,8 +651,9 @@ class CargoApp(ctk.CTk):
                                          font=ctk.CTkFont(size=11))
         self.entry_status.pack(anchor="w", padx=16)
 
-        _accent_btn(card, "✓  Add contract   (Ctrl+Enter)", self._add_contract,
-                    height=36).pack(fill="x", padx=16, pady=(6, 14))
+        self.add_contract_btn = _accent_btn(
+            card, self._ADD_LABEL, self._add_contract, height=36)
+        self.add_contract_btn.pack(fill="x", padx=16, pady=(6, 14))
 
     def _flash(self, msg: str) -> None:
         self.entry_status.configure(text=msg)
@@ -604,8 +673,7 @@ class CargoApp(ctk.CTk):
                           hover_color=DANGER, text_color=MUTED,
                           command=lambda idx=i: self._remove_cargo_at(idx)).pack(
                 side="right", padx=4, pady=2)
-            boxes = ", ".join(f"{s}x{n}" for s, n in sorted(item.boxes.items(),
-                                                            reverse=True))
+            boxes = format_boxes(item.boxes)
             extra = f"  ·  {boxes}" if boxes else ""
             ctk.CTkLabel(
                 line, text=f"{item.commodity} × {item.scu} SCU  →  "
@@ -618,6 +686,36 @@ class CargoApp(ctk.CTk):
             del self.draft_cargo[idx]
             self._refresh_draft()
 
+    def _field_nav(self, i: int, forward: bool, picker=None) -> str:
+        """Move focus between cargo-entry fields by keyboard. If leaving a
+        location picker with its dropdown open, accept the highlighted match
+        first so a partial selection isn't lost."""
+        if picker is not None and picker.popup is not None \
+                and picker.listbox is not None:
+            picker._accept()
+        last = len(self._field_order) - 1
+        if forward:
+            nxt = 2 if i == last else min(i + 1, last)   # Boxes -> Commodity
+        else:
+            nxt = max(i - 1, 0)
+        self._field_order[nxt].focus_set()
+        return "break"
+
+    def _on_amount_change(self, *_args) -> None:
+        """Keep the Boxes field in sync with the SCU amount, suggesting the
+        fewest-container breakdown -- unless the user has typed their own."""
+        cur = self.boxes_var.get().strip()
+        if cur and cur != self._boxes_auto:
+            return                       # user-edited: leave their breakdown be
+        text = self.amount_var.get().strip()
+        if not text or not text.isdigit() or int(text) <= 0:
+            if cur == self._boxes_auto:  # clear our suggestion too
+                self.boxes_var.set("")
+                self._boxes_auto = ""
+            return
+        self._boxes_auto = format_boxes(breakdown_scu(int(text)))
+        self.boxes_var.set(self._boxes_auto)
+
     def _add_cargo(self) -> None:
         commodity = self.commodity_var.get().strip() or "Cargo"
         dropoff = self.cdropoff_picker.get_id()
@@ -628,6 +726,11 @@ class CargoApp(ctk.CTk):
             boxes = parse_boxes(self.boxes_var.get())
         except ValueError as e:
             self._flash(str(e))
+            return
+        bad = [s for s in boxes if s not in BOX_SIZES]
+        if bad:
+            allowed = ", ".join(str(s) for s in sorted(BOX_SIZES))
+            self._flash(f"Box size {bad[0]} isn't valid — use {allowed} SCU.")
             return
         amount_text = self.amount_var.get().strip()
         if amount_text:
@@ -644,11 +747,15 @@ class CargoApp(ctk.CTk):
         if scu <= 0:
             self._flash("SCU amount must be positive.")
             return
+        # No explicit breakdown -> default to the fewest-container split.
+        if not boxes:
+            boxes = breakdown_scu(scu)
         self.draft_cargo.append(CargoItem(commodity, scu, dropoff, boxes))
         self._refresh_draft()
         self.commodity_picker.clear()
         self.amount_var.set("")
         self.boxes_var.set("")
+        self._boxes_auto = ""
         self.cdropoff_picker.clear()
         self._flash("")
         self.commodity_picker.entry.focus_set()
@@ -666,11 +773,21 @@ class CargoApp(ctk.CTk):
         except ValueError:
             self._flash("Reward must be a whole number.")
             return
-        letter = _index_to_letters(self._letter_counter)
-        self._letter_counter += 1
-        self.contracts.append(Contract(
-            letter=letter, pickup=self.cpickup_picker.get_id(),
-            cargo=list(self.draft_cargo), reward=reward))
+        contract = Contract(
+            letter="", pickup=self.cpickup_picker.get_id(),
+            cargo=list(self.draft_cargo), reward=reward)
+        if self._editing_index is not None:
+            # Save in place, preserving the contract's letter and position.
+            idx = min(self._editing_index, len(self.contracts) - 1)
+            contract.letter = self._editing_letter or self.contracts[idx].letter
+            self.contracts[idx] = contract
+            self._editing_index = None
+            self._editing_letter = None
+            self.add_contract_btn.configure(text=self._ADD_LABEL)
+        else:
+            contract.letter = _index_to_letters(self._letter_counter)
+            self._letter_counter += 1
+            self.contracts.append(contract)
         # reset the draft; keep the pickup sticky for the next contract
         self.draft_cargo = []
         self.reward_var.set("")
@@ -679,6 +796,8 @@ class CargoApp(ctk.CTk):
         self._refresh_ledger()
         self._refresh_contract_label()
         self._flash("")
+        # pickup stays sticky -> jump straight to the next line's commodity
+        self.commodity_picker.entry.focus_set()
 
     # -- ledger ------------------------------------------------------------
 
@@ -716,8 +835,12 @@ class CargoApp(ctk.CTk):
                 anchor="w", padx=6, pady=6)
             return
         for ci, c in enumerate(self.contracts):
-            block = ctk.CTkFrame(self.ledger_box, fg_color=FIELD_BG,
-                                 corner_radius=10)
+            editing = (ci == self._editing_index)
+            block = ctk.CTkFrame(self.ledger_box,
+                                 fg_color=CHIP_BG if editing else FIELD_BG,
+                                 corner_radius=10,
+                                 border_width=2 if editing else 0,
+                                 border_color=ACCENT)
             block.pack(fill="x", pady=3)
             hdr = ctk.CTkFrame(block, fg_color="transparent")
             hdr.pack(fill="x")
@@ -726,6 +849,11 @@ class CargoApp(ctk.CTk):
                           text_color=MUTED,
                           command=lambda i=ci: self._remove_contract(i)).pack(
                 side="right", padx=4, pady=2)
+            ctk.CTkButton(hdr, text="✎", width=26, height=26,
+                          fg_color="transparent", hover_color=ACCENT,
+                          text_color=ACCENT if editing else MUTED,
+                          command=lambda i=ci: self._edit_contract(i)).pack(
+                side="right", padx=0, pady=2)
             rew = f"   ·   {c.reward:,} aUEC" if c.reward else ""
             total_scu = sum(it.scu for it in c.cargo)
             ctk.CTkLabel(
@@ -742,19 +870,65 @@ class CargoApp(ctk.CTk):
             ctk.CTkFrame(block, height=4, fg_color="transparent").pack()
 
     def _remove_contract(self, idx: int) -> None:
-        if 0 <= idx < len(self.contracts):
-            del self.contracts[idx]
-            self._refresh_ledger()
+        if not (0 <= idx < len(self.contracts)):
+            return
+        del self.contracts[idx]
+        if self._editing_index is not None:
+            if idx == self._editing_index:
+                self._cancel_edit()         # editing target gone -> stop editing
+                return
+            if idx < self._editing_index:
+                self._editing_index -= 1
+        self._refresh_ledger()
+
+    def _edit_contract(self, idx: int) -> None:
+        if not (0 <= idx < len(self.contracts)):
+            return
+        if self._editing_index == idx:      # clicking ✎ again cancels
+            self._cancel_edit()
+            return
+        c = self.contracts[idx]
+        self._editing_index = idx
+        self._editing_letter = c.letter
+        self.cpickup_picker.set_by_id(c.pickup)
+        self.reward_var.set(str(c.reward) if c.reward else "")
+        # copy the cargo so editing the draft doesn't mutate the saved contract
+        self.draft_cargo = [CargoItem(it.commodity, it.scu, it.dropoff,
+                                      dict(it.boxes)) for it in c.cargo]
+        self.add_contract_btn.configure(text=self._SAVE_LABEL)
+        self._refresh_draft()
+        self._refresh_ledger()
+        self._refresh_contract_label()
+        self._flash(f"Editing Contract {c.letter} — change it, then Save.")
+
+    def _cancel_edit(self) -> None:
+        self._editing_index = None
+        self._editing_letter = None
+        self.draft_cargo = []
+        self.reward_var.set("")
+        self.cdropoff_picker.clear()
+        self.add_contract_btn.configure(text=self._ADD_LABEL)
+        self._refresh_draft()
+        self._refresh_ledger()
+        self._refresh_contract_label()
+        self._flash("")
 
     def _clear_all(self) -> None:
         self.contracts = []
+        self._editing_index = None
+        self._editing_letter = None
+        self.add_contract_btn.configure(text=self._ADD_LABEL)
         self._refresh_ledger()
 
     # -- contract lettering ------------------------------------------------
 
     def _refresh_contract_label(self) -> None:
-        self.contract_label.configure(
-            text=f"NEW CONTRACT — {_index_to_letters(self._letter_counter)}")
+        if self._editing_index is not None and self._editing_letter:
+            self.contract_label.configure(
+                text=f"EDITING CONTRACT — {self._editing_letter}")
+        else:
+            self.contract_label.configure(
+                text=f"NEW CONTRACT — {_index_to_letters(self._letter_counter)}")
 
     def _clear_labels(self) -> None:
         for i, c in enumerate(self.contracts):
@@ -828,6 +1002,17 @@ class CargoApp(ctk.CTk):
         # -tabs is ignored by Tk); see _render_route / _route_tab_x.
         t.tag_configure("name", foreground=TEXT, font=("Segoe UI", 13, "bold"),
                         spacing1=14)
+        # current ("you are here") stop: accent number + name, with a chip-tinted
+        # line so it stands out at a glance while flying.
+        t.tag_configure("cur_num", foreground=ACCENT, font=("Segoe UI", 13, "bold"),
+                        lmargin1=6, spacing1=14, background=CHIP_BG)
+        t.tag_configure("cur_name", foreground=ACCENT, font=("Segoe UI", 13, "bold"),
+                        spacing1=14, background=CHIP_BG)
+        # completed stop: dimmed number, struck-through name.
+        t.tag_configure("dim", foreground=MUTED, font=("Segoe UI", 13, "bold"),
+                        lmargin1=6, spacing1=14)
+        t.tag_configure("done_name", foreground=MUTED, font=("Segoe UI", 13),
+                        overstrike=True, spacing1=14)
         t.tag_configure("drop_lab", foreground=DROP_BLUE,
                         font=("Segoe UI", 10, "bold"), lmargin1=38)
         t.tag_configure("drop_item", foreground=DROP_BLUE, font=("Segoe UI", 11),
@@ -933,20 +1118,24 @@ class CargoApp(ctk.CTk):
                 t.insert("end", f"{item.commodity} - {item.scu} SCU\n",
                          (item_tag, tag) + done)
 
-    def _ins_stop(self, n: int, stop, capacity: int) -> None:
-        drop_groups = self._assign(stop.dropoffs)
-        load_groups = self._assign(stop.pickups)
-        if self._overlay and not any(
-                self._visible(gid)
-                for gid, _, _ in (*drop_groups, *load_groups)):
-            return  # whole stop ticked off -> hide it in overlay
+    def _ins_stop(self, n: int, stop, capacity: int, si: int,
+                  drop_groups, load_groups, state: str) -> None:
+        if self._overlay and state == "done":
+            return  # hide finished stops in the overlay
 
         t = self.route_text
-        t.insert("end", f"{self._badge(n)}  ", ("num",))
-        t.insert("end", self._name(stop.location), ("name",))
+        stop_tag = f"stop{si}"
+        if state == "current":
+            num_tag, name_tag, marker = "cur_num", "cur_name", "▶ "
+        elif state == "done":
+            num_tag, name_tag, marker = "dim", "done_name", "✓ "
+        else:
+            num_tag, name_tag, marker = "num", "name", ""
+        t.insert("end", f"{marker}{self._badge(n)}  ", (num_tag, stop_tag))
+        t.insert("end", self._name(stop.location), (name_tag, stop_tag))
         if self._overlay:
             # Overlay = bare minimum: just the stop name, no capacity bar.
-            t.insert("end", "\n", ("name",))
+            t.insert("end", "\n", (name_tag,))
         else:
             # Rounded capacity bar + label, right-aligned via the tab stop.
             frac = (stop.onboard_after / capacity) if capacity else 0
@@ -954,18 +1143,23 @@ class CargoApp(ctk.CTk):
                                      corner_radius=5, progress_color=ACCENT,
                                      fg_color=TRACK_BG)
             bar.set(max(0.0, min(1.0, frac)))
-            t.insert("end", "\t", ("name",))
+            t.insert("end", "\t", (name_tag, stop_tag))
             t.window_create("end", window=bar, pady=2)
             t.insert("end", f"  {stop.onboard_after} / {capacity} SCU\n",
-                     ("name", "barlabel"))
+                     (name_tag, "barlabel"))
         self._render_legs("DROP", drop_groups, "drop_lab", "drop_item")
         self._render_legs("LOAD", load_groups, "load_lab", "load_item")
 
     def _on_route_click(self, event):
         idx = self.route_text.index(f"@{event.x},{event.y}")
-        for tag in self.route_text.tag_names(idx):
+        tags = self.route_text.tag_names(idx)
+        for tag in tags:                       # an individual order line
             if tag.startswith("ord"):
                 self._toggle_check(int(tag[3:]))
+                return "break"
+        for tag in tags:                       # the stop header -> whole stop
+            if tag.startswith("stop"):
+                self._toggle_stop(int(tag[4:]))
                 return "break"
 
     def _toggle_check(self, oid: int) -> None:
@@ -973,7 +1167,23 @@ class CargoApp(ctk.CTk):
         if self._rt_ctx:
             self._render_route(*self._rt_ctx)
 
-    def _render_route(self, plan, capacity, reward) -> None:
+    def _toggle_stop(self, si: int) -> None:
+        """Mark a whole stop done (or undo it) -- ticks all its orders, which
+        advances the highlighted 'current' stop to the next unfinished one."""
+        gids = self._stop_gids.get(si, [])
+        if not gids:
+            return
+        if all(g in self._checked for g in gids):
+            self._checked.difference_update(gids)
+        else:
+            self._checked.update(gids)
+        if self._rt_ctx:
+            self._render_route(*self._rt_ctx)
+
+    def _render_route(self, plan, capacity, reward, preserve_scroll=True) -> None:
+        # Keep the reader's place across re-renders (ticking a box, resizing);
+        # only a fresh optimize jumps back to the top.
+        prev_scroll = self.route_text.yview()[0]
         for w in self.stats_wrap.winfo_children():
             w.destroy()
         self._route_begin()
@@ -1005,9 +1215,29 @@ class CargoApp(ctk.CTk):
             for note in plan.notes:
                 self._stat_banner("ℹ  " + note, ACCENT)
 
-        # stop list (fast native text)
+        # Pass 1: assign stable order ids per stop and figure out which stop is
+        # "current" (the first one not fully ticked off).
         self._seq = 0                   # per-render order-id counter
+        self._stop_gids = {}
+        stop_groups: dict[int, tuple] = {}
+        si = 0
+        for trip in plan.trips:
+            for stop in trip.stops:
+                dg = self._assign(stop.dropoffs)
+                lg = self._assign(stop.pickups)
+                stop_groups[si] = (dg, lg)
+                self._stop_gids[si] = [g for g, _, _ in dg] + [g for g, _, _ in lg]
+                si += 1
+
+        def _done(k: int) -> bool:
+            gids = self._stop_gids.get(k, [])
+            return bool(gids) and all(g in self._checked for g in gids)
+
+        current = next((k for k in range(si) if not _done(k)), None)
+
+        # Pass 2: render with current/done/upcoming state per stop.
         multi = len(plan.trips) > 1
+        si = 0
         for ti, trip in enumerate(plan.trips, 1):
             if multi:
                 util = (trip.peak_scu / capacity * 100) if capacity else 0
@@ -1016,8 +1246,15 @@ class CargoApp(ctk.CTk):
                     f"TRIP {ti}  ·  peak {trip.peak_scu}/{capacity} SCU "
                     f"({util:.0f}%)\n", ("trip",))
             for j, stop in enumerate(trip.stops, 1):
-                self._ins_stop(j, stop, capacity)
+                dg, lg = stop_groups[si]
+                state = ("done" if _done(si)
+                         else "current" if si == current else "upcoming")
+                self._ins_stop(j, stop, capacity, si, dg, lg, state)
+                si += 1
         self._route_end()
+        if preserve_scroll:
+            self.route_text.update_idletasks()
+            self.route_text.yview_moveto(prev_scroll)
 
     def _copy_route(self) -> None:
         if not self._last_plan_text:
@@ -1076,7 +1313,7 @@ class CargoApp(ctk.CTk):
         self._last_plan = plan
         self._last_plan_text = format_plan(plan, self.locations, cap,
                                            total_reward=reward)
-        self._render_route(plan, cap, reward)
+        self._render_route(plan, cap, reward, preserve_scroll=False)
 
 
 def run() -> None:
