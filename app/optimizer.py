@@ -30,8 +30,12 @@ from dataclasses import dataclass
 from .cost import CostModel
 from .models import Leg, RoutePlan, Ship, Stop, Trip
 
-# Distinct-location count above which we use the heuristic instead of exact B&B.
-EXACT_LIMIT = 11
+# Distinct-location count above which we use the greedy heuristic instead of the
+# exact branch-and-bound. B&B always returns the optimal stop count (and never
+# an empty pass-through stop); its time is bounded by the node budget inside
+# _branch_and_bound, so this can sit comfortably above 11 -- worst-case search
+# stays under ~1s and real (varied-distance) inputs resolve far faster.
+EXACT_LIMIT = 14
 
 
 @dataclass
@@ -61,32 +65,43 @@ def optimize(
         plan.notes.append("No cargo legs to plan.")
         return plan
 
-    oversize = [leg for leg in legs if leg.scu > ship.scu_capacity]
+    cap = ship.scu_capacity
+
+    # Self-loop legs (pickup == dropoff) are "deliver where you load" -- they're
+    # never carried between locations, so they don't constrain routing or
+    # capacity. Routing them would only break the single-visit assumption and
+    # force pointless return trips, so we set them aside and re-attach them to
+    # the stop at their location afterwards.
+    selfloops = [leg for leg in legs if leg.pickup == leg.dropoff]
+    real = [leg for leg in legs if leg.pickup != leg.dropoff]
+
+    oversize = [leg for leg in real if leg.scu > cap]
     if oversize:
         plan.feasible = False
         for leg in oversize:
             plan.notes.append(
                 f"Leg {leg.commodity_summary} at {leg.scu} SCU exceeds capacity "
-                f"of {ship.scu_capacity} SCU and can never be carried whole."
+                f"of {cap} SCU and can never be carried whole."
             )
         return plan
 
     # No explicit start -> begin where you load the most cargo (the busiest
     # pickup hub). This avoids opening on an empty pass-through stop and matches
     # how you'd actually run it: fill up at the biggest pickup first.
-    if start is None:
+    if start is None and real:
         load_by_pickup: dict[str, int] = {}
         legs_by_pickup: dict[str, int] = {}
-        for leg in legs:
+        for leg in real:
             load_by_pickup[leg.pickup] = load_by_pickup.get(leg.pickup, 0) + leg.scu
             legs_by_pickup[leg.pickup] = legs_by_pickup.get(leg.pickup, 0) + 1
         start = max(legs_by_pickup,
                     key=lambda p: (legs_by_pickup[p], load_by_pickup[p]))
 
     # 1) Try to serve everything in a single trip (fewest possible stops).
-    single = _best_order(legs, ship.scu_capacity, cost, start)
+    single = _best_order(real, cap, cost, start) if real else None
     if single is not None:
-        plan.trips.append(_build_trip(single, legs, ship.scu_capacity, cost, start))
+        plan.trips.append(_build_trip(single, real, cap, cost, start))
+        _attach_selfloops(plan, selfloops, cost, cap, start)
         return plan
 
     # 2) No order visits every location once (e.g. a hub is both a pickup and a
@@ -94,11 +109,12 @@ def optimize(
     #    often still resolves to ONE trip that revisits a stop -- which is fine,
     #    because dropping off frees space. Only flag a split when peak load
     #    genuinely forces more than one run.
-    for bin_legs in _pack_trips(legs, ship.scu_capacity):
-        order = _best_order(bin_legs, ship.scu_capacity, cost, start)
+    for bin_legs in _pack_trips(real, cap):
+        order = _best_order(bin_legs, cap, cost, start)
         if order is None:  # safety: a single-bin sum<=cap order always exists
-            order = _greedy_order(bin_legs, ship.scu_capacity, cost, start)
-        plan.trips.append(_build_trip(order, bin_legs, ship.scu_capacity, cost, start))
+            order = _greedy_order(bin_legs, cap, cost, start)
+        plan.trips.append(_build_trip(order, bin_legs, cap, cost, start))
+    _attach_selfloops(plan, selfloops, cost, cap, start)
 
     if len(plan.trips) > 1:
         plan.notes.append(
@@ -108,12 +124,52 @@ def optimize(
     # Last-resort safety net: if any planned run still peaks over capacity
     # (only possible from a greedy fallback on a hard instance), say so rather
     # than presenting an un-haulable route as fine.
-    if any(t.peak_scu > ship.scu_capacity for t in plan.trips):
+    if any(t.peak_scu > cap for t in plan.trips):
         plan.notes.append(
             "Warning: a planned trip's peak load exceeds capacity; this route "
             "may not be haulable exactly as ordered."
         )
     return plan
+
+
+def _attach_selfloops(
+    plan: RoutePlan,
+    selfloops: list[Leg],
+    cost: CostModel,
+    cap: int,
+    start: str | None,
+) -> None:
+    """Fold deliver-where-you-load legs back into the route for display: load
+    and deliver them at the stop already visiting their location. If the route
+    doesn't otherwise visit that location, add a single stop for it."""
+    if not selfloops:
+        return
+    by_loc: dict[str, list[Leg]] = {}
+    for leg in selfloops:
+        by_loc.setdefault(leg.pickup, []).append(leg)
+
+    for loc, group in by_loc.items():
+        stop = next((s for t in plan.trips for s in t.stops
+                     if s.location == loc), None)
+        if stop is not None:
+            stop.pickups.extend(group)       # load and deliver in the one visit
+            stop.dropoffs.extend(group)
+            continue
+        # Location isn't visited otherwise -> give it its own stop.
+        if not plan.trips:
+            plan.trips.append(Trip(capacity=cap))
+        trip = plan.trips[0]
+        last = trip.stops[-1].location if trip.stops else start
+        onboard = trip.stops[-1].onboard_after if trip.stops else 0
+        step = cost.travel_minutes(last, loc) if last is not None else 0.0
+        trip.total_minutes += step
+        trip.stops.append(Stop(
+            location=loc,
+            dropoffs=list(group),
+            pickups=list(group),
+            onboard_after=onboard,
+            travel_from_prev=step,
+        ))
 
 
 # --- single-trip ordering -------------------------------------------------
@@ -236,13 +292,22 @@ def _greedy_order(
     visits = 0
     while remaining and visits < max_visits:
         visits += 1
+        # Only ever go somewhere there's actual work to do right now -- cargo to
+        # load, or onboard cargo we can deliver. Without this the heuristic will
+        # happily open on the nearest location (often the start itself) even when
+        # nothing can happen there yet, producing pointless empty pass-through
+        # stops before any cargo is loaded.
+        pool = [loc for loc in remaining
+                if deliverable_drops(loc) or pending_picks(loc)]
+        if not pool:
+            pool = list(remaining)
         candidates = [
-            loc for loc in remaining
+            loc for loc in pool
             if onboard - sum(l.scu for l in deliverable_drops(loc))
                        + sum(l.scu for l in pending_picks(loc)) <= cap
         ]
         if not candidates:
-            candidates = list(remaining)
+            candidates = pool
         # Prefer a stop we can FINISH in this visit: one where every drop still
         # owed here is already onboard, so we deliver it and retire the location
         # for good. Visiting a location that is also the dropoff of a leg we
@@ -261,13 +326,22 @@ def _greedy_order(
         # on (travel 0).
         if seq and len(candidates) > 1 and last in candidates:
             candidates = [c for c in candidates if c != last]
-        loc = min(
-            candidates,
-            key=lambda c: (
-                cost.travel_minutes(last, c) if last is not None else 0.0,
-                c in visited,  # prefer an unvisited stop over revisiting one
-            ),
-        )
+
+        def _near(c):
+            return cost.travel_minutes(last, c) if last is not None else 0.0
+
+        deliver_here = [c for c in candidates if deliverable_drops(c)]
+        if deliver_here:
+            # We're carrying cargo we can drop -- unload it now (frees the hold
+            # and retires the stop). Nearest such stop wins.
+            loc = min(deliver_here, key=lambda c: (_near(c), c in visited))
+        else:
+            # Nothing to deliver yet -- go load where we'll pick up the MOST,
+            # i.e. fill the main hub before scattering to small pickups (avoids
+            # visiting a small pickup early and having to return to its shared
+            # location later). Break ties by distance.
+            loc = min(candidates, key=lambda c: (
+                -sum(l.scu for l in pending_picks(c)), _near(c), c in visited))
         minutes += cost.travel_minutes(last, loc) if last is not None else 0.0
         drops = deliverable_drops(loc)
         picks = pending_picks(loc)
@@ -371,6 +445,12 @@ def _build_trip(
         drops = [l for l in by_dropoff.get(loc, [])
                  if id(l) in loaded_legs and id(l) not in dropped_legs]
         picks = [l for l in by_pickup.get(loc, []) if id(l) not in loaded_legs]
+        # Never emit a stop where nothing happens -- you'd never fly there to do
+        # nothing. Skip it and let the next real stop's travel be measured from
+        # the last place we actually stopped. (Defensive: a good ordering won't
+        # produce these, but this keeps any stray one out of the route.)
+        if not drops and not picks:
+            continue
         loaded_legs |= {id(l) for l in picks}
         dropped_legs |= {id(l) for l in drops}
         onboard -= sum(l.scu for l in drops)   # dropoffs first

@@ -88,7 +88,8 @@ def test_greedy_does_not_double_visit_a_completable_hub() -> None:
     # both an outbound pickup (L4 -> M) and a later inbound dropoff (A -> L4)
     # must still be visited exactly once: load at A first, then a single L4 stop
     # delivers A's cargo and loads L4's. Regression for greedy revisiting it.
-    names = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L4", "M", "N"]
+    names = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L4", "M",
+             "N", "O", "P", "Q", "R"]
     locs = {"STANTON": Location("STANTON", "Stanton", "system", "STANTON", None)}
     for n in names:
         locs["STANTON." + n] = Location(
@@ -103,6 +104,7 @@ def test_greedy_does_not_double_visit_a_completable_hub() -> None:
         L("A", "L4", 10), L("L4", "M", 10),
         L("B", "C", 5), L("D", "E", 5), L("F", "G", 5),
         L("H", "I", 5), L("J", "K", 5), L("N", "B", 5),
+        L("O", "P", 5), L("Q", "R", 5),     # push distinct count past EXACT_LIMIT
     ]
     plan = optimize(legs, Ship("hauler", 100), cost, start="STANTON.L4")
     assert plan.feasible
@@ -131,7 +133,7 @@ def test_large_instance_splits_when_capacity_forces_it() -> None:
     locs = {"S": Location("S", "S", "system", "S", None),
             "P": Location("P", "P", "lagrange", "S", "S")}
     legs = []
-    for i in range(12):
+    for i in range(16):                       # >EXACT_LIMIT distinct dropoffs
         d = f"D{i}"
         locs[d] = Location(d, d, "lagrange", "S", "S")
         legs.append(Leg.single("P", d, "x", 40))
@@ -160,6 +162,71 @@ def test_capacity_tiebreak_prefers_lower_peak() -> None:
     print("peak-tiebreak OK: peak", plan.trips[0].peak_scu)
 
 
+def test_selfloop_legs_delivered_in_a_single_visit() -> None:
+    # A "deliver where you load" leg (pickup == dropoff) must be loaded AND
+    # delivered in one visit -- never forcing a wasted return trip -- and must
+    # not break the exact solver. Regression for self-loop contracts.
+    locs = {"S": Location("S", "S", "system", "S", None)}
+    for n in ["X", "Y", "Z"]:
+        locs[n] = Location(n, n, "lagrange", "S", "S")
+    cost = CostModel(locs)
+
+    def L(p, d, s, c):
+        return Leg.single(p, d, "x", s, contract=c)
+
+    legs = [
+        L("X", "Y", 10, "A"),   # real transport leg
+        L("X", "X", 5, "H"),    # self-loop at X (also visited for A's pickup)
+        L("Z", "Z", 3, "K"),    # self-loop at Z (not otherwise visited)
+    ]
+    plan = optimize(legs, Ship("h", 100), cost, start="X")
+    assert plan.feasible
+    seq = [s.location for t in plan.trips for s in t.stops]
+    assert seq.count("X") == 1, f"X revisited: {seq}"
+    assert seq.count("Z") == 1, f"Z should be visited once for its self-loop: {seq}"
+    delivered = sum(len(s.dropoffs) for t in plan.trips for s in t.stops)
+    assert delivered == len(legs), f"only {delivered}/{len(legs)} delivered"
+    # The self-loop shows as both a load and a drop at its stop.
+    xstop = next(s for t in plan.trips for s in t.stops if s.location == "X")
+    assert any(l.contract == "H" for l in xstop.pickups)
+    assert any(l.contract == "H" for l in xstop.dropoffs)
+    print("self-loop OK:", seq)
+
+
+def test_greedy_makes_no_empty_passthrough_stops() -> None:
+    # Greedy path (>EXACT_LIMIT distinct), a "cyclic" graph where no location is
+    # a pure pickup, plus dropoff-only stations -- and the player starts at one
+    # of those dropoff-only stations. The route must never open on (or include)
+    # a stop with nothing to load or deliver. Regression for empty pass-through
+    # stops appearing at the start of the route.
+    locs = {"S": Location("S", "S", "system", "S", None)}
+    names = ["P1", "P2", "D1", "D2",
+             "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10"]
+    for n in names:
+        locs[n] = Location(n, n, "lagrange", "S", "S")
+
+    def L(p, d, s):
+        return Leg.single(p, d, "x", s)
+
+    legs = [
+        L("P1", "P2", 5), L("P2", "P1", 5),   # cycle: no pure pickup
+        L("P1", "D1", 5), L("P2", "D2", 5),   # D1, D2 dropoff-only
+        L("F1", "F2", 5), L("F2", "F1", 5),
+        L("F3", "F4", 5), L("F4", "F3", 5),
+        L("F5", "F6", 5), L("F6", "F5", 5),
+        L("F7", "F8", 5), L("F8", "F7", 5),
+        L("F9", "F10", 5), L("F10", "F9", 5),
+    ]
+    plan = optimize(legs, Ship("h", 192), CostModel(locs), start="D1")
+    assert plan.feasible
+    empty = [s.location for t in plan.trips for s in t.stops
+             if not s.dropoffs and not s.pickups]
+    assert not empty, f"empty pass-through stops: {empty}"
+    delivered = sum(len(s.dropoffs) for t in plan.trips for s in t.stops)
+    assert delivered == len(legs), f"only {delivered}/{len(legs)} delivered"
+    print("no-empty-stops OK:", plan.total_stops, "stops, all delivered")
+
+
 if __name__ == "__main__":
     test_single_trip_respects_precedence_and_capacity()
     test_disjoint_legs_chain_into_one_trip()
@@ -169,4 +236,6 @@ if __name__ == "__main__":
     test_greedy_does_not_double_visit_a_completable_hub()
     test_large_instance_splits_when_capacity_forces_it()
     test_capacity_tiebreak_prefers_lower_peak()
+    test_selfloop_legs_delivered_in_a_single_visit()
+    test_greedy_makes_no_empty_passthrough_stops()
     print("\nAll optimizer tests passed.")
