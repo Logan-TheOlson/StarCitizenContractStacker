@@ -585,12 +585,13 @@ class CargoApp(ctk.CTk):
         _label(top, "Pickup (stays for the next contract)").grid(
             row=0, column=0, padx=6, sticky="w")
         self.cpickup_picker = LocationPicker(
-            top, self.loc_options, width=320,
+            top, self.loc_options, width=200,
             sort_key=self._dist_key(lambda: self.start_picker.get_id()))
-        self.cpickup_picker.grid(row=1, column=0, padx=6, pady=(0, 8), sticky="w")
+        self.cpickup_picker.grid(row=1, column=0, padx=6, pady=(0, 8), sticky="ew")
         _label(top, "Reward aUEC").grid(row=0, column=1, padx=6, sticky="w")
-        reward = _entry(top, self.reward_var, 130)
+        reward = _entry(top, self.reward_var, 120)
         reward.grid(row=1, column=1, padx=6, pady=(0, 8), sticky="w")
+        top.grid_columnconfigure(0, weight=1)   # pickup grows with the pane
 
         ctk.CTkFrame(card, height=1, fg_color=FIELD_BG).pack(
             fill="x", padx=16, pady=(4, 8))
@@ -605,19 +606,23 @@ class CargoApp(ctk.CTk):
         _label(row, "Dropoff").grid(row=0, column=2, padx=4, sticky="w")
         _label(row, "Boxes").grid(row=0, column=3, padx=4, sticky="w")
         self.commodity_picker = LocationPicker(
-            row, self.commodity_options, width=130, allow_free=True,
+            row, self.commodity_options, width=80, allow_free=True,
             variable=self.commodity_var, placeholder="commodity…")
-        self.commodity_picker.grid(row=1, column=0, padx=4, pady=(0, 6), sticky="w")
-        amt = _entry(row, self.amount_var, 52, "SCU")
-        amt.grid(row=1, column=1, padx=4, pady=(0, 6), sticky="w")
+        self.commodity_picker.grid(row=1, column=0, padx=4, pady=(0, 6), sticky="ew")
+        amt = _entry(row, self.amount_var, 40, "SCU")
+        amt.grid(row=1, column=1, padx=4, pady=(0, 6), sticky="ew")
         self.cdropoff_picker = LocationPicker(
-            row, self.loc_options, width=140, placeholder="dropoff…",
+            row, self.loc_options, width=80, placeholder="dropoff…",
             sort_key=self._dist_key(lambda: self.cpickup_picker.get_id()))
-        self.cdropoff_picker.grid(row=1, column=2, padx=4, pady=(0, 6), sticky="w")
-        boxes = _entry(row, self.boxes_var, 110, "auto · e.g. 8x1, 2x1")
-        boxes.grid(row=1, column=3, padx=4, pady=(0, 6), sticky="w")
-        _accent_btn(row, "+ Add", self._add_cargo, width=70).grid(
+        self.cdropoff_picker.grid(row=1, column=2, padx=4, pady=(0, 6), sticky="ew")
+        boxes = _entry(row, self.boxes_var, 70, "auto")
+        boxes.grid(row=1, column=3, padx=4, pady=(0, 6), sticky="ew")
+        _accent_btn(row, "+ Add", self._add_cargo, width=58).grid(
             row=1, column=4, padx=4, pady=(0, 6), sticky="w")
+        # Fields share the pane width; the +Add button (col 4) stays put on the
+        # right so it never gets pushed off the card.
+        for _col, _wgt in ((0, 3), (1, 1), (2, 3), (3, 2)):
+            row.grid_columnconfigure(_col, weight=_wgt)
 
         # --- keyboard-only entry flow ------------------------------------
         # Fields in tab order. After Boxes, Tab loops back to Commodity so you
@@ -634,6 +639,10 @@ class CargoApp(ctk.CTk):
             w.bind("<Tab>", lambda _e, i=i, pk=pk: self._field_nav(i, True, pk))
             for seq in ("<Shift-Tab>", "<ISO_Left_Tab>"):
                 w.bind(seq, lambda _e, i=i, pk=pk: self._field_nav(i, False, pk))
+            # Ctrl+Enter commits the contract from any field (the top-level bind
+            # alone doesn't fire while a CTk entry holds focus).
+            for seq in ("<Control-Return>", "<Control-KP_Enter>"):
+                w.bind(seq, lambda _e: self._add_contract() or "break")
         # Enter advances like Tab; on the pickers this happens after the match
         # is accepted (see LocationPicker._on_return / _on_choose).
         self.cpickup_picker._on_choose = lambda: self._field_order[1].focus_set()
