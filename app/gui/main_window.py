@@ -1023,11 +1023,11 @@ class CargoApp(ctk.CTk):
         t.tag_configure("done_name", foreground=MUTED, font=("Segoe UI", 13),
                         overstrike=True, spacing1=14)
         t.tag_configure("drop_lab", foreground=DROP_BLUE,
-                        font=("Segoe UI", 10, "bold"), lmargin1=38)
+                        font=("Segoe UI", 10, "bold"), lmargin1=38, spacing1=8)
         t.tag_configure("drop_item", foreground=DROP_BLUE, font=("Segoe UI", 11),
                         lmargin1=82, lmargin2=82, spacing3=1)
         t.tag_configure("load_lab", foreground=LOAD_GREEN,
-                        font=("Segoe UI", 10, "bold"), lmargin1=38)
+                        font=("Segoe UI", 10, "bold"), lmargin1=38, spacing1=8)
         t.tag_configure("load_item", foreground=LOAD_GREEN, font=("Segoe UI", 11),
                         lmargin1=82, lmargin2=82, spacing3=1)
         t.tag_configure("leg_head", foreground=MUTED,
@@ -1148,12 +1148,14 @@ class CargoApp(ctk.CTk):
         else:
             # Rounded capacity bar + label, right-aligned via the tab stop.
             frac = (stop.onboard_after / capacity) if capacity else 0
-            bar = ctk.CTkProgressBar(self.route_text, width=150, height=11,
-                                     corner_radius=5, progress_color=ACCENT,
-                                     fg_color=TRACK_BG)
+            # Low corner radius so an empty (0 SCU) bar reads as a flat track,
+            # not a stray dot; centered on the line next to the stop name.
+            bar = ctk.CTkProgressBar(self.route_text, width=150, height=10,
+                                     corner_radius=3, border_width=0,
+                                     progress_color=ACCENT, fg_color=TRACK_BG)
             bar.set(max(0.0, min(1.0, frac)))
             t.insert("end", "\t", (name_tag, stop_tag))
-            t.window_create("end", window=bar, pady=2)
+            t.window_create("end", window=bar, pady=3, align="center")
             t.insert("end", f"  {stop.onboard_after} / {capacity} SCU\n",
                      (name_tag, "barlabel"))
         self._render_legs("DROP", drop_groups, "drop_lab", "drop_item")
