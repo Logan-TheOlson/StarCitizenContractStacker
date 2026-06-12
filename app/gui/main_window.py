@@ -1003,7 +1003,7 @@ class CargoApp(ctk.CTk):
 
     def _configure_route_tags(self) -> None:
         t = self.route_text
-        t.tag_configure("num", foreground=ACCENT, font=("Segoe UI", 13, "bold"),
+        t.tag_configure("num", foreground=ACCENT, font=("Segoe UI", 17, "bold"),
                         lmargin1=6, spacing1=14)
         # Tab stop parks the capacity bar in a fixed column to the right of the
         # stop title, so the bars line up regardless of title length.
@@ -1011,14 +1011,15 @@ class CargoApp(ctk.CTk):
         # -tabs is ignored by Tk); see _render_route / _route_tab_x.
         t.tag_configure("name", foreground=TEXT, font=("Segoe UI", 13, "bold"),
                         spacing1=14)
-        # current ("you are here") stop: accent number + name, with a chip-tinted
-        # line so it stands out at a glance while flying.
-        t.tag_configure("cur_num", foreground=ACCENT, font=("Segoe UI", 13, "bold"),
-                        lmargin1=6, spacing1=14, background=CHIP_BG)
+        # current ("you are here") stop: accent number + name marked by the ▶
+        # arrow. (No line background -- a Text bg can't paint behind the embedded
+        # capacity-bar widget, which looks patchy.)
+        t.tag_configure("cur_num", foreground=ACCENT, font=("Segoe UI", 17, "bold"),
+                        lmargin1=6, spacing1=14)
         t.tag_configure("cur_name", foreground=ACCENT, font=("Segoe UI", 13, "bold"),
-                        spacing1=14, background=CHIP_BG)
+                        spacing1=14)
         # completed stop: dimmed number, struck-through name.
-        t.tag_configure("dim", foreground=MUTED, font=("Segoe UI", 13, "bold"),
+        t.tag_configure("dim", foreground=MUTED, font=("Segoe UI", 17, "bold"),
                         lmargin1=6, spacing1=14)
         t.tag_configure("done_name", foreground=MUTED, font=("Segoe UI", 13),
                         overstrike=True, spacing1=14)
