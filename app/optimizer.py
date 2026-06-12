@@ -14,13 +14,15 @@ Strategy
   one trip via exact branch-and-bound; if any precedence/capacity-feasible order
   exists, that is the fewest-stops solution and we pick the cheapest by time,
   breaking ties on the lowest peak load.
-* If one trip can't fit the cargo, we bin-pack legs into the *minimum* number of
-  capacity-feasible trips (fewest trips => fewest stops) and optimize each trip's
-  ordering independently.
+* If one trip can't fit the cargo, we run a single continuous SHUTTLE instead of
+  separate runs: load what fits, deliver, and on the way back fill the hold with
+  whatever is going the other way (e.g. L2->L1 contracts), splitting any leg too
+  big to carry in one go across multiple passes. Oversized legs are pre-split
+  into capacity-sized chunks so "carry half now, half later" just works.
 * Above a size threshold the exact search is skipped for a greedy
   nearest-feasible heuristic so the UI never hangs. The greedy result is then
   validated; if it can't serve everything in one capacity-feasible pass we fall
-  back to the multi-trip bin-packing path rather than emit an invalid route.
+  back to the shuttle rather than emit an invalid route.
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .cost import CostModel
-from .models import Leg, RoutePlan, Ship, Stop, Trip
+from .models import CargoItem, Leg, RoutePlan, Ship, Stop, Trip
 
 # Distinct-location count above which we use the greedy heuristic instead of the
 # exact branch-and-bound. B&B always returns the optimal stop count (and never
@@ -75,15 +77,14 @@ def optimize(
     selfloops = [leg for leg in legs if leg.pickup == leg.dropoff]
     real = [leg for leg in legs if leg.pickup != leg.dropoff]
 
-    oversize = [leg for leg in real if leg.scu > cap]
-    if oversize:
+    if cap <= 0:
         plan.feasible = False
-        for leg in oversize:
-            plan.notes.append(
-                f"Leg {leg.commodity_summary} at {leg.scu} SCU exceeds capacity "
-                f"of {cap} SCU and can never be carried whole."
-            )
+        plan.notes.append("Ship capacity must be at least 1 SCU.")
         return plan
+
+    # A leg bigger than the hold is no longer hopeless -- split it into
+    # capacity-sized chunks and the shuttle carries it across several passes.
+    real = _split_legs(real, cap)
 
     # No explicit start -> begin where you load the most cargo (the busiest
     # pickup hub). This avoids opening on an empty pass-through stop and matches
@@ -104,31 +105,24 @@ def optimize(
         _attach_selfloops(plan, selfloops, cost, cap, start)
         return plan
 
-    # 2) No order visits every location once (e.g. a hub is both a pickup and a
-    #    later dropoff). Bin-pack into the fewest capacity-feasible trips. This
-    #    often still resolves to ONE trip that revisits a stop -- which is fine,
-    #    because dropping off frees space. Only flag a split when peak load
-    #    genuinely forces more than one run.
-    for bin_legs in _pack_trips(real, cap):
-        order = _best_order(bin_legs, cap, cost, start)
-        if order is None:  # safety: a single-bin sum<=cap order always exists
-            order = _greedy_order(bin_legs, cap, cost, start)
-        plan.trips.append(_build_trip(order, bin_legs, cap, cost, start))
+    # 2) One pass can't carry everything (capacity, or a hub that's both a pickup
+    #    and a later dropoff). Run a continuous shuttle: load what fits, deliver,
+    #    refill the return leg with whatever's heading back, revisiting as needed.
+    trip = _shuttle_trip(real, cap, cost, start)
+    plan.trips.append(trip)
     _attach_selfloops(plan, selfloops, cost, cap, start)
 
-    if len(plan.trips) > 1:
+    revisited = len({s.location for s in trip.stops}) < len(trip.stops)
+    if revisited:
         plan.notes.append(
-            "Peak load exceeds ship capacity for a single trip; split into "
-            "multiple runs (returning to reload)."
+            "Too much cargo for one load: shuttling back and forth, carrying "
+            "return-trip contracts on the way to avoid empty legs."
         )
-    # Last-resort safety net: if any planned run still peaks over capacity
-    # (only possible from a greedy fallback on a hard instance), say so rather
-    # than presenting an un-haulable route as fine.
-    if any(t.peak_scu > cap for t in plan.trips):
+    delivered = sum(len(s.dropoffs) for s in trip.stops)
+    if delivered < len(real):
+        plan.feasible = False
         plan.notes.append(
-            "Warning: a planned trip's peak load exceeds capacity; this route "
-            "may not be haulable exactly as ordered."
-        )
+            "Could not route every leg; some cargo is left undelivered.")
     return plan
 
 
@@ -170,6 +164,105 @@ def _attach_selfloops(
             onboard_after=onboard,
             travel_from_prev=step,
         ))
+
+
+# --- split-load shuttle (capacity-forced runs) ----------------------------
+
+def _split_legs(legs: list[Leg], cap: int) -> list[Leg]:
+    """Split any leg larger than the hold into capacity-sized chunks so it can
+    be carried over multiple passes. Legs that already fit pass through."""
+    out: list[Leg] = []
+    for leg in legs:
+        if leg.scu <= cap:
+            out.append(leg)
+            continue
+        for chunk in _chunk_cargo(leg.cargo, cap):
+            out.append(Leg(leg.pickup, leg.dropoff, chunk, leg.contract))
+    return out
+
+
+def _chunk_cargo(cargo: list[CargoItem], cap: int) -> list[list[CargoItem]]:
+    """Partition cargo into groups each totalling <= cap SCU, splitting an
+    individual item if it alone exceeds cap."""
+    chunks: list[list[CargoItem]] = []
+    cur: list[CargoItem] = []
+    cur_scu = 0
+    for item in cargo:
+        remaining = item.scu
+        while remaining > 0:
+            if cur_scu >= cap:
+                chunks.append(cur)
+                cur, cur_scu = [], 0
+            take = min(remaining, cap - cur_scu)
+            cur.append(CargoItem(item.commodity, take, item.dropoff))
+            cur_scu += take
+            remaining -= take
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
+def _shuttle_trip(
+    legs: list[Leg], cap: int, cost: CostModel, start: str | None
+) -> Trip:
+    """One continuous run that revisits locations until everything is delivered:
+    at each stop drop what's destined there, then load as much waiting cargo as
+    fits; head to a dropoff while carrying cargo, otherwise to the next pickup.
+
+    Built directly (not via _build_trip) because the per-visit load split can't
+    be reconstructed from a bare location sequence.
+    """
+    by_pickup, _ = _index_legs(legs)
+    trip = Trip(capacity=cap)
+    picked: set[int] = set()
+    dropped: set[int] = set()
+    onboard: list[Leg] = []
+    load = 0
+    last = start
+    location = start
+    total = len(legs)
+    guard, max_guard = 0, total * 4 + 10
+
+    def near(target: str) -> float:
+        return cost.travel_minutes(last, target) if last is not None else 0.0
+
+    while len(dropped) < total and guard < max_guard:
+        guard += 1
+        # 1) deliver onboard cargo whose destination is here
+        drops = [l for l in onboard if l.dropoff == location]
+        for l in drops:
+            load -= l.scu
+            dropped.add(id(l))
+        if drops:
+            onboard = [l for l in onboard if l.dropoff != location]
+        # 2) load waiting cargo that fits (biggest chunks first to pack tight)
+        avail = sorted((l for l in by_pickup.get(location, []) if id(l) not in picked),
+                       key=lambda l: -l.scu)
+        picks: list[Leg] = []
+        for l in avail:
+            if l.scu <= cap - load:
+                picks.append(l)
+                picked.add(id(l))
+                onboard.append(l)
+                load += l.scu
+        if drops or picks:
+            step = near(location)
+            trip.total_minutes += step
+            trip.peak_scu = max(trip.peak_scu, load)
+            trip.stops.append(Stop(
+                location=location, dropoffs=list(drops), pickups=list(picks),
+                onboard_after=load, travel_from_prev=step))
+            last = location
+        # 3) clear the hold before going for more: head to a dropoff if carrying
+        #    cargo, otherwise to the nearest remaining pickup.
+        if onboard:
+            targets = {l.dropoff for l in onboard}
+        else:
+            targets = {l.pickup for l in legs if id(l) not in picked}
+        if not targets:
+            break
+        location = min(targets, key=near)
+    return trip
 
 
 # --- single-trip ordering -------------------------------------------------
@@ -360,54 +453,6 @@ def _greedy_order(
 
     return _Order(seq, minutes, peak)
 
-
-# --- multi-trip packing ---------------------------------------------------
-
-def _pack_trips(legs: list[Leg], cap: int) -> list[list[Leg]]:
-    """First-fit-decreasing bin packing that keeps *chained* legs together.
-
-    Only a chain dependency forces two legs into the same trip: when one leg's
-    dropoff is another leg's pickup, visiting that hub drops cargo and frees
-    room for the pickup, so their peak load can stay below the sum and they may
-    fit a single run that revisits the hub. Legs that merely share a pickup (or
-    merely share a dropoff) are carried at the same time -- their peak *is* the
-    sum -- so they must stay splittable across trips when over capacity. We
-    group chained legs first, then bin-pack those groups by total SCU.
-    """
-    # Build connected components over the chain relation only.
-    components: list[set[int]] = []
-    for i, leg in enumerate(legs):
-        touching = {j for j, comp in enumerate(components)
-                    if any(legs[k].dropoff == leg.pickup or
-                           legs[k].pickup == leg.dropoff
-                           for k in comp)}
-        if touching:
-            merged: set[int] = {i}
-            for j in touching:
-                merged |= components[j]
-            components = [c for j, c in enumerate(components) if j not in touching]
-            components.append(merged)
-        else:
-            components.append({i})
-
-    groups = [sorted(comp) for comp in components]
-
-    # Now bin-pack groups (not individual legs) by total SCU.
-    bins: list[list[Leg]] = []
-    sums: list[int] = []
-    for group in sorted(groups, key=lambda g: sum(legs[i].scu for i in g), reverse=True):
-        group_scu = sum(legs[i].scu for i in group)
-        placed = False
-        for b, used in enumerate(sums):
-            if used + group_scu <= cap:
-                bins[b].extend(legs[i] for i in group)
-                sums[b] += group_scu
-                placed = True
-                break
-        if not placed:
-            bins.append([legs[i] for i in group])
-            sums.append(group_scu)
-    return bins
 
 # --- shared helpers -------------------------------------------------------
 

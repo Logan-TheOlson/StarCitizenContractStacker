@@ -46,27 +46,46 @@ def test_disjoint_legs_chain_into_one_trip() -> None:
     print("chained single-trip OK: peak", plan.trips[0].peak_scu, "SCU")
 
 
-def test_capacity_forces_multiple_trips() -> None:
+def test_capacity_forces_a_shuttle() -> None:
     cost = _cost()
     # Both legs load at Lorville, so one visit must carry 80 SCU > capacity.
+    # The planner shuttles: load one, deliver, come back for the other.
     legs = [
         Leg.single("LORVILLE", "AREA18", "Titanium", 40, contract="A"),
         Leg.single("LORVILLE", "ORISON", "Tungsten", 40, contract="B"),
     ]
     plan = optimize(legs, Ship("Cutlass", 46), cost)
     assert plan.feasible
-    assert len(plan.trips) == 2, f"expected 2 trips, got {len(plan.trips)}"
-    for trip in plan.trips:
-        assert trip.peak_scu <= 46
-    print("multi-trip OK:", len(plan.trips), "trips")
+    assert len(plan.trips) == 1, "shuttle is one continuous run"
+    trip = plan.trips[0]
+    assert trip.peak_scu <= 46
+    delivered = sum(len(s.dropoffs) for s in trip.stops)
+    assert delivered == len(legs), f"only {delivered}/{len(legs)} delivered"
+    # Lorville is revisited to pick up the second load.
+    assert sum(1 for s in trip.stops if s.location == "LORVILLE") >= 2
+    print("shuttle OK:", trip.total_stops if hasattr(trip, "total_stops")
+          else len(trip.stops), "stops, peak", trip.peak_scu)
 
 
-def test_oversize_leg_is_infeasible() -> None:
+def test_oversize_leg_is_split_not_rejected() -> None:
+    # A 100 SCU leg on a 46 SCU hold is now handled by splitting/shuttling
+    # rather than being flagged infeasible.
     cost = _cost()
     legs = [Leg.single("LORVILLE", "AREA18", "Ore", 100, contract="A")]
-    plan = optimize(legs, Ship("Cutlass", 46), cost)
+    plan = optimize(legs, Ship("Cutlass", 46), cost, start="LORVILLE")
+    assert plan.feasible
+    trip = plan.trips[0]
+    assert trip.peak_scu <= 46
+    delivered = sum(l.scu for s in trip.stops for l in s.dropoffs)
+    assert delivered == 100, delivered
+    print("oversize-split OK: peak", trip.peak_scu)
+
+
+def test_zero_capacity_is_infeasible() -> None:
+    cost = _cost()
+    legs = [Leg.single("LORVILLE", "AREA18", "Ore", 10, contract="A")]
+    plan = optimize(legs, Ship("Cutlass", 0), cost)
     assert not plan.feasible
-    print("oversize OK:", plan.notes[0])
 
 
 def test_prefers_fewer_stops_in_one_trip() -> None:
@@ -125,10 +144,10 @@ def test_greedy_does_not_double_visit_a_completable_hub() -> None:
     print("no-double-visit OK:", [v.split(".")[-1] for v in visits])
 
 
-def test_large_instance_splits_when_capacity_forces_it() -> None:
-    # >EXACT_LIMIT distinct locations (greedy path) where one hub's total pickup
-    # far exceeds capacity: must split into capacity-feasible trips and deliver
-    # every leg. Regression for the greedy path returning a single nonsense trip
+def test_large_instance_shuttles_when_capacity_forces_it() -> None:
+    # >EXACT_LIMIT distinct locations where one hub's total pickup far exceeds
+    # capacity: must shuttle (one continuous run) and deliver every leg within
+    # capacity. Regression for the greedy path returning a single nonsense trip
     # that delivered nothing yet reported feasible.
     locs = {"S": Location("S", "S", "system", "S", None),
             "P": Location("P", "P", "lagrange", "S", "S")}
@@ -139,12 +158,42 @@ def test_large_instance_splits_when_capacity_forces_it() -> None:
         legs.append(Leg.single("P", d, "x", 40))
     plan = optimize(legs, Ship("h", 100), CostModel(locs))
     assert plan.feasible
-    assert len(plan.trips) > 1, "should split into multiple trips"
-    delivered = sum(len(s.dropoffs) for t in plan.trips for s in t.stops)
+    assert len(plan.trips) == 1, "shuttle is one continuous run"
+    trip = plan.trips[0]
+    delivered = sum(len(s.dropoffs) for s in trip.stops)
     assert delivered == len(legs), f"only {delivered}/{len(legs)} delivered"
-    for t in plan.trips:
-        assert t.peak_scu <= 100, f"trip over capacity: {t.peak_scu}"
-    print("large-split OK:", len(plan.trips), "trips, all", len(legs), "delivered")
+    assert trip.peak_scu <= 100, f"over capacity: {trip.peak_scu}"
+    # the hub gets revisited to reload
+    assert sum(1 for s in trip.stops if s.location == "P") > 1
+    print("large-shuttle OK:", len(trip.stops), "stops, peak", trip.peak_scu)
+
+
+def test_oversized_leg_is_split_and_shuttled() -> None:
+    # A single leg bigger than the hold is no longer infeasible -- it's split
+    # and carried over multiple passes, with a return-direction leg filling the
+    # way back (the user's L1<->L2 example).
+    locs = {"S": Location("S", "S", "system", "S", None),
+            "L1": Location("L1", "L1", "lagrange", "S", "S"),
+            "L2": Location("L2", "L2", "lagrange", "S", "S")}
+    legs = [Leg.single("L1", "L2", "Ice", 200, contract="A"),
+            Leg.single("L2", "L1", "Waste", 50, contract="B")]
+    plan = optimize(legs, Ship("h", 100), CostModel(locs), start="L1")
+    assert plan.feasible and len(plan.trips) == 1
+    trip = plan.trips[0]
+    assert trip.peak_scu <= 100
+    by_contract: dict[str, int] = {}
+    loaded: dict[str, int] = {}
+    for s in trip.stops:
+        for l in s.pickups:
+            loaded[l.contract] = loaded.get(l.contract, 0) + l.scu
+        for l in s.dropoffs:
+            by_contract[l.contract] = by_contract.get(l.contract, 0) + l.scu
+    assert by_contract == {"A": 200, "B": 50}, by_contract
+    assert loaded == {"A": 200, "B": 50}, loaded
+    # the big leg was carried in more than one pass
+    a_drops = sum(1 for s in trip.stops for l in s.dropoffs if l.contract == "A")
+    assert a_drops >= 2, "200 SCU should be delivered over multiple passes"
+    print("oversize-shuttle OK:", len(trip.stops), "stops")
 
 
 def test_capacity_tiebreak_prefers_lower_peak() -> None:
@@ -230,11 +279,13 @@ def test_greedy_makes_no_empty_passthrough_stops() -> None:
 if __name__ == "__main__":
     test_single_trip_respects_precedence_and_capacity()
     test_disjoint_legs_chain_into_one_trip()
-    test_capacity_forces_multiple_trips()
-    test_oversize_leg_is_infeasible()
+    test_capacity_forces_a_shuttle()
+    test_oversize_leg_is_split_not_rejected()
+    test_zero_capacity_is_infeasible()
     test_prefers_fewer_stops_in_one_trip()
     test_greedy_does_not_double_visit_a_completable_hub()
-    test_large_instance_splits_when_capacity_forces_it()
+    test_large_instance_shuttles_when_capacity_forces_it()
+    test_oversized_leg_is_split_and_shuttled()
     test_capacity_tiebreak_prefers_lower_peak()
     test_selfloop_legs_delivered_in_a_single_visit()
     test_greedy_makes_no_empty_passthrough_stops()
